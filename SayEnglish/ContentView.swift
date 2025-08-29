@@ -1,399 +1,773 @@
 //
-//  SayEnglish.swift
-//  SayEnglish
+//  ContentView.swift
+//  EnglishChatApp
 //
-//  Created by 김동준 on 8/27/25.
+//  Created by YourName on 2024/08/29.
 //
 
 import SwiftUI
-import UserNotifications
 import AVFoundation
+import Speech
+import UserNotifications
 
-// MARK: - App
-@main
-struct SayEnglishApp: App {
-    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    var body: some Scene { WindowGroup { ContentView() } }
+// MARK: - 1. Data Models (서버와 통신할 데이터 구조)
+// FastAPI 서버의 Pydantic 모델과 동일한 구조로 Codable을 채택합니다.
+struct ChatMessage: Identifiable, Codable {
+    let id = UUID()
+    let role: String
+    let text: String
 }
 
-// MARK: - AppDelegate (포그라운드에서도 알림 표시 + 탭 시 TTS)
-final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
-    private let tts = AVSpeechSynthesizer()
-
-    func application(_ application: UIApplication,
-                     didFinishLaunchingWithOptions opts: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        UNUserNotificationCenter.current().delegate = self
-        return true
-    }
-
-    func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                willPresent notification: UNNotification,
-                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .list, .sound])
-    }
-
-    func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                didReceive response: UNNotificationResponse,
-                                withCompletionHandler completionHandler: @escaping () -> Void) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            self.speak("Great! Let's practice two quick phrases.")
-        }
-        completionHandler()
-    }
-
-    private func speak(_ text: String) {
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.duckOthers])
-        try? AVAudioSession.sharedInstance().setActive(true)
-        let u = AVSpeechUtterance(string: text)
-        u.voice = AVSpeechSynthesisVoice(language: "en-US")
-        u.rate = AVSpeechUtteranceDefaultSpeechRate
-        u.volume = 1.0
-        tts.speak(u)
-    }
+// /chat/start 엔드포인트 응답
+struct StartResponse: Codable {
+    let assistant_text: String
 }
 
-// MARK: - Model
-enum AlarmKind: Equatable {
-    case daily(time: Date)                                  // 매일 특정 시각
-    case weekly(time: Date, weekdays: Set<Int>)             // 요일별(일=1 ... 토=7)
-    case interval(minutes: Int)                             // N분마다
+// /chat/reply 엔드포인트 요청
+struct ReplyRequest: Codable {
+    let history: [ChatMessage]
+    let user_text: String
 }
 
-struct CustomAlarm: Identifiable, Equatable {
-    let id: UUID
-    var kind: AlarmKind
-    var enabled: Bool
-
-    init(id: UUID = UUID(), kind: AlarmKind, enabled: Bool = true) {
-        self.id = id; self.kind = kind; self.enabled = enabled
-    }
-
-    var label: String {
-        switch kind {
-        case .daily(let t):
-            return "매일 \(Self.hmString(t))"
-        case .weekly(let t, let wds):
-            let names = ["일","월","화","수","목","금","토"]
-            let list = wds.sorted().map { names[$0-1] }.joined(separator: "·")
-            return "매주 \(list) \(Self.hmString(t))"
-        case .interval(let m):
-            return "매 \(m)분"
-        }
-    }
-
-    static func hmString(_ d: Date) -> String {
-        let f = DateFormatter(); f.locale = .init(identifier: "ko_KR"); f.dateFormat = "HH:mm"
-        return f.string(from: d)
-    }
+// /chat/reply 엔드포인트 응답
+struct ReplyResponse: Codable {
+    let assistant_text: String
 }
 
-// MARK: - NotiManager
-@MainActor
-final class NotiManager: ObservableObject {
-    enum RepeatMode: String, CaseIterable, Identifiable { case daily = "매일", weekly = "요일별"; var id: String { rawValue } }
-
-    // 상단 입력값
-    @Published var repeatMode: RepeatMode = .daily
-    @Published var fixedTime: Date = Calendar.current.date(bySettingHour: 20, minute: 30, second: 0, of: Date())!
-    @Published var weekdaySelections: Set<Int> = [2,3,4,5,6] // 월~금
-
-    // 주기 입력값
-    @Published var intervalMinutes: Int = 30
-
-    // 사용자 알람 목록 (최대 5개)
-    @Published var alarms: [CustomAlarm] = []
-
-    // 사운드 풀(랜덤)
-    private let soundFiles = ["eng_prompt_01.wav","eng_prompt_02.wav","eng_prompt_03.wav","eng_prompt_04.wav","eng_prompt_05.wav"]
-
-    // 권한
-    private func ensureAuth() async -> Bool {
-        let center = UNUserNotificationCenter.current()
-        let settings = await center.notificationSettings()
-        if settings.authorizationStatus == .authorized { return true }
-        do {
-            let ok = try await center.requestAuthorization(options: [.alert, .sound, .badge])
-            return ok
-        } catch { return false }
-    }
-
-    // MARK: - 저장 버튼 동작
-    func saveFixedAsAlarm() async {
-        guard alarms.count < 5 else { return }
-        switch repeatMode {
+// 알람 데이터 모델
+struct Alarm: Identifiable, Codable, Equatable {
+    var id: String
+    var type: AlarmType
+    var time: Date
+    var weekdays: Set<Int> // 1(일요일) ~ 7(토요일)
+    var interval: Int? // 주기 (분 단위)
+    var isActive: Bool
+    
+    // 알람의 사용자 친화적인 설명
+    var description: String {
+        switch type {
         case .daily:
-            let a = CustomAlarm(kind: .daily(time: fixedTime))
-            alarms.append(a)
-            await schedule(a)
+            return "매일 \(formattedTime)"
         case .weekly:
-            guard !weekdaySelections.isEmpty else { return }
-            let a = CustomAlarm(kind: .weekly(time: fixedTime, weekdays: weekdaySelections))
-            alarms.append(a)
-            await schedule(a)
+            let days = weekdays.sorted().map {
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "ko_KR")
+                return formatter.weekdaySymbols[$0 - 1]
+            }.joined(separator: ", ")
+            return "\(days) \(formattedTime)"
+        case .interval:
+            return "\(interval!)분마다"
         }
     }
-
-    func saveIntervalAsAlarm() async {
-        guard alarms.count < 5 else { return }
-        let mins = max(1, intervalMinutes)
-        let a = CustomAlarm(kind: .interval(minutes: mins))
-        alarms.append(a)
-        await schedule(a)
+    
+    var formattedTime: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: time)
     }
-
-    // MARK: - 목록 토글 & 삭제
-    func toggle(_ alarm: CustomAlarm, isOn: Bool) async {
-        if let idx = alarms.firstIndex(of: alarm) {
-            alarms[idx].enabled = isOn
-        }
-        if isOn { await schedule(alarm) } else { await cancel(alarm) }
-    }
-
-    func delete(_ alarm: CustomAlarm) async {
-        await cancel(alarm)
-        alarms.removeAll { $0.id == alarm.id }
-    }
-
-    // MARK: - 스케줄/취소
-    private func schedule(_ alarm: CustomAlarm) async {
-        guard await ensureAuth(), alarm.enabled else { return }
-        switch alarm.kind {
-        case .daily(let t):
-            let comps = Calendar.current.dateComponents([.hour, .minute], from: t)
-            let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
-            try? await addRequest(idPrefix: "alarm-\(alarm.id)-daily", trigger: trigger)
-
-        case .weekly(let t, let wds):
-            let hm = Calendar.current.dateComponents([.hour, .minute], from: t)
-            for wd in wds {
-                var dc = DateComponents(); dc.weekday = wd; dc.hour = hm.hour; dc.minute = hm.minute
-                let trigger = UNCalendarNotificationTrigger(dateMatching: dc, repeats: true)
-                try? await addRequest(idPrefix: "alarm-\(alarm.id)-weekly-\(wd)", trigger: trigger)
-            }
-
-        case .interval(let minutes):
-            let secs = max(60, minutes * 60)
-            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: TimeInterval(secs), repeats: true)
-            try? await addRequest(idPrefix: "alarm-\(alarm.id)-interval", trigger: trigger)
-        }
-    }
-
-    private func cancel(_ alarm: CustomAlarm) async {
-        let center = UNUserNotificationCenter.current()
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            center.getPendingNotificationRequests { reqs in
-                let ids = reqs.map(\.identifier).filter { $0.hasPrefix("alarm-\(alarm.id)") }
-                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
-                cont.resume()
-            }
-        }
-    }
-
-    private func addRequest(idPrefix: String, trigger: UNNotificationTrigger) async throws {
+    
+    // UNNotificationRequest 생성
+    func createNotificationRequest() -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
-        content.title = "Let’s practice English 🇺🇸"
-        content.body  = "Tap to continue the conversation"
-        if let name = soundFiles.randomElement() {
-            content.sound = UNNotificationSound(named: .init(name))
+        content.title = "영어 대화 알람"
+        content.body = "영어 대화할 시간입니다!"
+        
+        // 알람 소리: 사용자가 준비한 파일(conceptually)
+        // 실제 사용 시 'alarm_sound.wav' 파일을 프로젝트에 추가해야 합니다.
+        // 5가지 파일 중 랜덤하게 선택하는 로직을 위해 파일명을 배열로 관리합니다.
+        let alarmSounds = ["eng_prompt_01.wav", "eng_prompt_02.wav", "eng_prompt_03.wav", "eng_prompt_04.wav", "eng_prompt_05.wav"]
+        if let randomSound = alarmSounds.randomElement() {
+            content.sound = UNNotificationSound(named: UNNotificationSoundName(randomSound))
         } else {
             content.sound = .default
         }
-        let id = idPrefix // 고유 식별자
-        try await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+        
+        var trigger: UNNotificationTrigger?
+        
+        switch type {
+        case .daily, .weekly:
+            var dateComponents = Calendar.current.dateComponents([.hour, .minute], from: time)
+            
+            if type == .weekly {
+                // 선택된 요일에만 알람 설정
+                let weekday = Calendar.current.component(.weekday, from: time)
+                if !weekdays.contains(weekday) {
+                    // 선택된 요일이 아니므로 트리거를 설정하지 않음
+                    return UNNotificationRequest(identifier: self.id, content: content, trigger: nil)
+                }
+            }
+            
+            trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
+        case .interval:
+            if let interval = self.interval, interval > 0 {
+                trigger = UNTimeIntervalNotificationTrigger(timeInterval: TimeInterval(interval * 60), repeats: true)
+            }
+        }
+        
+        return UNNotificationRequest(identifier: self.id, content: content, trigger: trigger)
     }
 }
 
-// MARK: - UI
-struct ContentView: View {
-    @StateObject private var vm = NotiManager()
+enum AlarmType: String, CaseIterable, Codable {
+    case daily = "매일"
+    case weekly = "요일별"
+    case interval = "시간 주기"
+}
+
+// MARK: - 2. Audio Controller
+// 음성 입력 및 출력을 관리하는 클래스
+class AudioController: NSObject, ObservableObject, SFSpeechRecognizerDelegate, AVSpeechSynthesizerDelegate, SFSpeechRecognitionTaskDelegate {
+    
+    private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))!
+    private let synthesizer = AVSpeechSynthesizer()
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var recognitionTask: SFSpeechRecognitionTask?
+    private let audioEngine = AVAudioEngine()
+    
+    private var silenceTimer: Timer?
+    private let silenceTimeout: TimeInterval = 2.5
+    
+    weak var viewModel: ChatViewModel?
+
+    @Published var isRecognizing = false
+    @Published var recognizedText = ""
+    @Published var isSpeaking = false
+    
+    override init() {
+        super.init()
+        speechRecognizer.delegate = self
+        synthesizer.delegate = self
+        requestAuthorization()
+    }
+    
+    deinit {
+        silenceTimer?.invalidate()
+    }
+    
+    func requestAuthorization() {
+        SFSpeechRecognizer.requestAuthorization { authStatus in
+            OperationQueue.main.addOperation {
+                switch authStatus {
+                case .authorized:
+                    print("Speech recognition authorized.")
+                default:
+                    print("Speech recognition not authorized.")
+                }
+            }
+        }
+        AVAudioSession.sharedInstance().requestRecordPermission { granted in
+            if granted {
+                print("Microphone access granted.")
+            } else {
+                print("Microphone access not granted.")
+            }
+        }
+    }
+    
+    func startRecognition() throws {
+        guard let viewModel = viewModel, viewModel.isChatActive else { return }
+
+        if let recognitionTask = recognitionTask {
+            recognitionTask.cancel()
+            self.recognitionTask = nil
+        }
+        
+        let audioSession = AVAudioSession.sharedInstance()
+        try audioSession.setCategory(.playAndRecord, mode: .measurement, options: .duckOthers)
+        try audioSession.overrideOutputAudioPort(.speaker)
+        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+        
+        let inputNode = audioEngine.inputNode
+        
+        inputNode.removeTap(onBus: 0)
+        
+        recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
+        guard let recognitionRequest = recognitionRequest else { fatalError("Unable to create a SFSpeechAudioBufferRecognitionRequest object") }
+        recognitionRequest.shouldReportPartialResults = true
+
+        recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest, delegate: self)
+        
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { (buffer: AVAudioPCMBuffer, when: AVAudioTime) in
+            self.recognitionRequest?.append(buffer)
+        }
+        
+        audioEngine.prepare()
+        try audioEngine.start()
+        
+        isRecognizing = true
+        
+        resetSilenceTimer()
+    }
+    
+    func forceStopRecognition() {
+        audioEngine.stop()
+        recognitionRequest?.endAudio()
+        isRecognizing = false
+        silenceTimer?.invalidate()
+        silenceTimer = nil
+    }
+
+    func speak(_ text: String) {
+        if synthesizer.isSpeaking {
+            synthesizer.stopSpeaking(at: .immediate)
+        }
+        
+        forceStopRecognition()
+        
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.volume = 1.0
+        synthesizer.speak(utterance)
+    }
+    
+    // MARK: - SFSpeechRecognitionTaskDelegate
+    func speechRecognitionTask(_ task: SFSpeechRecognitionTask, didChange state: SFSpeechRecognitionTaskState) {
+    }
+    
+    func speechRecognitionTask(_ task: SFSpeechRecognitionTask, didStartSpeechAt: Date) {
+        resetSilenceTimer()
+    }
+    
+    func speechRecognitionTask(_ task: SFSpeechRecognitionTask, didFinishSpeech: SFSpeechRecognitionResult) {
+    }
+    
+    func speechRecognitionTask(_ task: SFSpeechRecognitionTask, didHypothesizeTranscription transcription: SFTranscription) {
+        self.recognizedText = transcription.formattedString
+        resetSilenceTimer()
+    }
+    
+    func speechRecognitionTask(_ task: SFSpeechRecognitionTask, didFinishSuccessfully successfully: Bool) {
+    }
+    
+    // MARK: - AVSpeechSynthesizerDelegate
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        self.isSpeaking = true
+    }
+    
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        self.isSpeaking = false
+        try? startRecognition()
+    }
+    
+    private func resetSilenceTimer() {
+        silenceTimer?.invalidate()
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: silenceTimeout, repeats: false) { [weak self] _ in
+            if let recognizedText = self?.recognizedText, !recognizedText.isEmpty {
+                self?.viewModel?.sendRecognizedText(recognizedText)
+                self?.recognizedText = ""
+            }
+        }
+    }
+}
+
+// MARK: - 3. ViewModel (앱의 로직을 담당)
+class ChatViewModel: ObservableObject {
+    
+    private let serverURL = "http://85bc2d4a2282.ngrok-free.app"
+    
+    @Published var messages: [ChatMessage] = []
+    @Published var isLoading = false
+    @Published var errorMessage: String? = nil
+    @Published var isChatActive: Bool = true
+
+    private var history: [ChatMessage] {
+        return messages.filter { $0.role != "system" }
+    }
+    
+    @Published var audioController: AudioController
+    
+    init() {
+        let controller = AudioController()
+        self.audioController = controller
+        controller.viewModel = self
+    }
+
+    func startChat() {
+        guard messages.isEmpty else { return }
+
+        Task {
+            await MainActor.run {
+                self.isLoading = true
+                self.errorMessage = nil
+            }
+            
+            do {
+                let url = URL(string: "\(serverURL)/chat/start")!
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                
+                let body = ["prompt": "Hello! Would you like to practice some interesting expressions with me?"]
+                request.httpBody = try JSONEncoder().encode(body)
+
+                let (data, _) = try await URLSession.shared.data(for: request)
+                let response = try JSONDecoder().decode(StartResponse.self, from: data)
+                
+                await MainActor.run {
+                    self.messages.append(ChatMessage(role: "assistant", text: response.assistant_text))
+                    self.isLoading = false
+                    self.audioController.speak(response.assistant_text)
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
+                    self.errorMessage = "Failed to start chat: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+    
+    func sendRecognizedText(_ text: String) {
+        guard !text.isEmpty && !isLoading && isChatActive else { return }
+        
+        let userMessage = ChatMessage(role: "user", text: text)
+        
+        DispatchQueue.main.async {
+            self.messages.append(userMessage)
+            self.isLoading = true
+            self.errorMessage = nil
+        }
+        
+        Task {
+            do {
+                let url = URL(string: "\(serverURL)/chat/reply")!
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                
+                let replyRequest = ReplyRequest(history: history, user_text: userMessage.text)
+                request.httpBody = try JSONEncoder().encode(replyRequest)
+
+                let (data, _) = try await URLSession.shared.data(for: request)
+                let response = try JSONDecoder().decode(ReplyResponse.self, from: data)
+                
+                await MainActor.run {
+                    self.messages.append(ChatMessage(role: "assistant", text: response.assistant_text))
+                    self.isLoading = false
+                    self.audioController.speak(response.assistant_text)
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
+                    self.errorMessage = "Failed to get AI response: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+    
+    func endChat() {
+        self.isChatActive = false
+        audioController.forceStopRecognition()
+        self.messages.append(ChatMessage(role: "system", text: "대화가 종료되었습니다."))
+    }
+    
+    func resumeChat() {
+        self.isChatActive = true
+        self.messages = []
+        self.startChat()
+    }
+}
+
+// MARK: - 4. Alarm Manager
+class AlarmManager: ObservableObject {
+    @Published var alarms: [Alarm] = []
+    
+    private let alarmsKey = "savedAlarms"
+    
+    init() {
+        loadAlarms()
+    }
+    
+    // UserDefaults에 알람 저장
+    private func saveAlarms() {
+        if let encoded = try? JSONEncoder().encode(alarms) {
+            UserDefaults.standard.set(encoded, forKey: alarmsKey)
+        }
+    }
+    
+    // UserDefaults에서 알람 불러오기
+    private func loadAlarms() {
+        if let savedAlarms = UserDefaults.standard.data(forKey: alarmsKey) {
+            if let decodedAlarms = try? JSONDecoder().decode([Alarm].self, from: savedAlarms) {
+                self.alarms = decodedAlarms
+                return
+            }
+        }
+        self.alarms = []
+    }
+    
+    // 알람 추가
+    func addAlarm(alarm: Alarm) {
+        // 최대 5개 알람 제한
+        guard alarms.count < 5 else { return }
+        
+        var newAlarm = alarm
+        // id가 비어있을 경우에만 새로운 id 생성
+        if newAlarm.id.isEmpty {
+            newAlarm.id = UUID().uuidString
+        }
+        alarms.append(newAlarm)
+        scheduleNotification(for: newAlarm)
+        saveAlarms()
+    }
+    
+    // 알람 활성화/비활성화
+    func toggleAlarm(id: String) {
+        if let index = alarms.firstIndex(where: { $0.id == id }) {
+            alarms[index].isActive.toggle()
+            if alarms[index].isActive {
+                scheduleNotification(for: alarms[index])
+            } else {
+                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [alarms[index].id])
+            }
+            saveAlarms()
+        }
+    }
+    
+    // 알람 삭제
+    func deleteAlarm(id: String) {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [id])
+        alarms.removeAll(where: { $0.id == id })
+        saveAlarms()
+    }
+    
+    // 알람 스케줄링
+    private func scheduleNotification(for alarm: Alarm) {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [alarm.id])
+        
+        guard alarm.isActive else { return }
+        
+        let request = alarm.createNotificationRequest()
+        if request.trigger != nil {
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error = error {
+                    print("알림 스케줄링 실패: \(error.localizedDescription)")
+                } else {
+                    print("알람 스케줄링 성공: \(alarm.id)")
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 5. Views (UI 컴포넌트)
+// 기존 대화 화면
+struct ChatView: View {
+    @StateObject private var viewModel = ChatViewModel()
+    @Binding var showChatView: Bool
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
+        VStack(spacing: 0) {
+            HStack {
+                Button(action: {
+                    withAnimation {
+                        showChatView = false
+                        viewModel.endChat()
+                    }
+                }) {
+                    Image(systemName: "chevron.left")
+                        .foregroundColor(.blue)
+                }
+                .padding(.horizontal)
+                
+                Spacer()
+                Text("English Tutor")
+                    .font(.headline)
+                Spacer()
+            }
+            .padding(.top)
+            .padding(.bottom, 5)
 
-                // 상단: 반복 스케줄 (저장 버튼으로 목록에 추가)
-                Card {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("반복 스케줄").font(.headline)
-                        Picker("", selection: $vm.repeatMode) {
-                            Text("매일").tag(NotiManager.RepeatMode.daily)
-                            Text("요일별").tag(NotiManager.RepeatMode.weekly)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 15) {
+                    ForEach(viewModel.messages) { message in
+                        MessageView(message: message) {
+                            if message.role == "assistant" {
+                                viewModel.audioController.speak(message.text)
+                            }
+                        }
+                    }
+                }
+                .padding()
+            }
+            .background(Color(.systemGray6))
+            
+            if let error = viewModel.errorMessage {
+                Text(error)
+                    .foregroundColor(.red)
+                    .padding()
+            }
+            
+            if viewModel.isLoading {
+                ProgressView()
+                    .padding()
+            }
+            
+            AudioControlView(viewModel: viewModel)
+                .padding()
+                .background(Color(.systemBackground))
+        }
+        .onAppear {
+            viewModel.startChat()
+        }
+    }
+}
+
+struct MessageView: View {
+    let message: ChatMessage
+    let action: () -> Void
+    
+    var isUser: Bool { message.role == "user" }
+    
+    var body: some View {
+        HStack {
+            if isUser {
+                Spacer()
+            } else {
+                Button(action: action) {
+                    Image(systemName: "speaker.wave.3.fill")
+                        .foregroundColor(.blue)
+                    }
+                }
+            
+            Text(message.text)
+                .padding(10)
+                .background(message.role == "user" ? Color.blue : Color(.systemGray4))
+                .foregroundColor(message.role == "user" ? .white : .black)
+                .cornerRadius(12)
+                .frame(maxWidth: 300, alignment: message.role == "user" ? .trailing : .leading)
+            
+            if !isUser {
+                Spacer()
+            }
+        }
+    }
+}
+
+struct AudioControlView: View {
+    @ObservedObject var viewModel: ChatViewModel
+
+    var body: some View {
+        if viewModel.isChatActive {
+            HStack {
+                Spacer()
+                if viewModel.audioController.isRecognizing {
+                    Text("Listening...")
+                        .foregroundColor(.gray)
+                } else if !viewModel.audioController.recognizedText.isEmpty {
+                    Text(viewModel.audioController.recognizedText)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundColor(.black)
+                } else {
+                    Text("말씀해주세요...")
+                        .foregroundColor(.gray)
+                }
+                Spacer()
+
+                Button(action: {
+                    viewModel.endChat()
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.largeTitle)
+                        .foregroundColor(.red)
+                }
+            }
+        } else {
+            HStack {
+                Spacer()
+                Button(action: {
+                    viewModel.resumeChat()
+                }) {
+                    Image(systemName: "arrow.clockwise.circle.fill")
+                        .font(.largeTitle)
+                        .foregroundColor(.green)
+                }
+                Text("재개")
+                    .foregroundColor(.green)
+                Spacer()
+            }
+        }
+    }
+}
+
+// 새로운 메인 알람 화면
+struct MainAlarmView: View {
+    @State private var selectedTab: AlarmType = .daily
+    @State private var selectedTime = Date()
+    @State private var selectedWeekdays: Set<Int> = []
+    @State private var selectedInterval: Double = 30 // 분 단위
+    
+    @StateObject private var alarmManager = AlarmManager()
+    
+    @Binding var showChatView: Bool
+    
+    // 요일 선택
+    let weekdays = ["일", "월", "화", "수", "목", "금", "토"]
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 20) {
+                // 상단 컨트롤 영역
+                VStack(spacing: 15) {
+                    HStack {
+                        // 매일/요일별 탭
+                        Picker("알람 유형", selection: $selectedTab) {
+                            Text(AlarmType.daily.rawValue).tag(AlarmType.daily)
+                            Text(AlarmType.weekly.rawValue).tag(AlarmType.weekly)
+                            Text(AlarmType.interval.rawValue).tag(AlarmType.interval)
                         }
                         .pickerStyle(.segmented)
-
-                        DatePicker("시간", selection: $vm.fixedTime, displayedComponents: .hourAndMinute)
-
-                        if vm.repeatMode == .weekly {
-                            WeekdayChips(selection: $vm.weekdaySelections)
-                        }
-
-                        Button {
-                            Task { await vm.saveFixedAsAlarm() }
-                        } label: {
-                            Label("저장", systemImage: "square.and.arrow.down.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(vm.alarms.count >= 5 || (vm.repeatMode == .weekly && vm.weekdaySelections.isEmpty))
-                    }
-                }
-
-                // 중간: 주기 알림 (저장 버튼으로 목록에 추가)
-                Card {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("주기 알림").font(.headline)
-                        Stepper(value: $vm.intervalMinutes, in: 1...360, step: 1) {
-                            Text("주기: \(vm.intervalMinutes)분")
-                        }
-                        Button {
-                            Task { await vm.saveIntervalAsAlarm() }
-                        } label: {
-                            Label("저장", systemImage: "square.and.arrow.down.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(vm.alarms.count >= 5)
-                    }
-                }
-
-                // TTS 버튼 (주기 알림 바로 아래)
-                Card {
-                    Button {
-                        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.duckOthers])
-                        try? AVAudioSession.sharedInstance().setActive(true)
-                        let tts = AVSpeechSynthesizer()
-                        let u = AVSpeechUtterance(string: "Hey! Want to practice three useful phrases today?")
-                        u.voice = AVSpeechSynthesisVoice(language: "en-US")
-                        tts.speak(u)
-                    } label: {
-                        HStack {
-                            Image(systemName: "waveform.circle.fill")
-                            Text("TTS로 말걸기")
-                        }
-                        .font(.title3.bold())
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
+                        
+                        // 알람 저장 버튼
+                        Button("저장") {
+                            let newAlarm: Alarm
+                            if selectedTab == .interval {
+                                newAlarm = Alarm(id: "", type: .interval, time: Date(), weekdays: [], interval: Int(selectedInterval), isActive: true)
+                            } else {
+                                newAlarm = Alarm(id: "", type: selectedTab, time: selectedTime, weekdays: selectedWeekdays, interval: nil, isActive: true)
+                            }
+                            alarmManager.addAlarm(alarm: newAlarm)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    Spacer()
+                    VStack(alignment: .leading, spacing: 10) {
+                        if selectedTab == .daily || selectedTab == .weekly {
+                            DatePicker("시간 선택", selection: $selectedTime, displayedComponents: .hourAndMinute)
+                                .labelsHidden()
+                                .datePickerStyle(.wheel)
+                                .frame(height: 100)
+                        }
+                        
+                        if selectedTab == .weekly {
+                            HStack(spacing: 10) {
+                                ForEach(1..<8) { weekday in
+                                    Text(weekdays[weekday - 1])
+                                        .frame(width: 30, height: 30)
+                                        .background(selectedWeekdays.contains(weekday) ? Color.blue : Color(.systemGray5))
+                                        .foregroundColor(selectedWeekdays.contains(weekday) ? .white : .black)
+                                        .cornerRadius(15)
+                                        .onTapGesture {
+                                            if selectedWeekdays.contains(weekday) {
+                                                selectedWeekdays.remove(weekday)
+                                            } else {
+                                                selectedWeekdays.insert(weekday)
+                                            }
+                                        }
+                                }
+                            }
+                        }
+                        
+                        if selectedTab == .interval {
+                            VStack(alignment: .leading) {
+                                Text("알람 주기 (\(Int(selectedInterval))분)")
+                                    .font(.headline)
+                                Slider(value: $selectedInterval, in: 5...60, step: 5)
+                                    .tint(.green)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    
+                }
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(15)
+                
+                // 대화하기 버튼
+                Button("대화하기") {
+                    withAnimation {
+                        showChatView = true
                     }
                 }
-
-                // 사용자 알람 목록 (맨 아래, 최대 5개)
-                Card {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("사용자 알람 (최대 5개)").font(.headline)
-                            Spacer()
-                            Text("\(vm.alarms.count)/5").foregroundColor(.secondary)
-                        }
-
-                        if vm.alarms.isEmpty {
-                            Text("위에서 저장을 눌러 알람을 추가하세요.")
-                                .foregroundColor(.secondary)
-                        } else {
-                            VStack(spacing: 10) {
-                                ForEach(vm.alarms) { alarm in
-                                    AlarmRow(
-                                        alarm: alarm,
-                                        onToggle: { isOn in Task { await vm.toggle(alarm, isOn: isOn) } },
-                                        onDelete: { Task { await vm.delete(alarm) } }
-                                    )
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.green)
+                .foregroundColor(.white)
+                .cornerRadius(15)
+                
+                // 알람 목록
+                List {
+                    Section(header: Text("내 알람 목록 (최대 5개)").font(.headline)) {
+                        ForEach(alarmManager.alarms) { alarm in
+                            HStack {
+                                Text(alarm.description)
+                                Spacer()
+                                Toggle("", isOn: Binding(
+                                    get: { alarm.isActive },
+                                    set: { _ in alarmManager.toggleAlarm(id: alarm.id) }
+                                ))
+                                .labelsHidden()
+                                .tint(.green)
+                                
+                                Button {
+                                    alarmManager.deleteAlarm(id: alarm.id)
+                                } label: {
+                                    Image(systemName: "trash.fill")
+                                        .foregroundColor(.red)
                                 }
                             }
                         }
                     }
                 }
-
+                .listStyle(.insetGrouped)
+                .frame(maxHeight: 250)
             }
-            .padding(16)
-        }
-        .background(LinearGradient(colors: [Color(.systemGray6), .white], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
-        .navigationTitle("English Poke")
-    }
-}
-
-// MARK: - Subviews
-struct Card<Content: View>: View {
-    let content: () -> Content
-    init(@ViewBuilder _ content: @escaping () -> Content) { self.content = content }
-    var body: some View {
-        VStack { content() }
-            .padding(16)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 6)
-    }
-}
-
-struct WeekdayChips: View {
-    @Binding var selection: Set<Int>
-    private let labels = ["일","월","화","수","목","금","토"] // 1~7
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach(1...7, id: \.self) { wd in
-                let isOn = selection.contains(wd)
-                Text(labels[wd - 1])
-                    .font(.subheadline.weight(.semibold))
-                    .frame(width: 34, height: 34)
-                    .background(isOn ? Color.accentColor.opacity(0.18) : Color.gray.opacity(0.12))
-                    .foregroundColor(isOn ? .accentColor : .primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .onTapGesture {
-                        if isOn { selection.remove(wd) } else { selection.insert(wd) }
-                    }
-            }
+            .padding()
+            .navigationTitle("메인 화면")
         }
     }
 }
 
-struct AlarmRow: View {
-    let alarm: CustomAlarm
-    var onToggle: (Bool) -> Void
-    var onDelete: () -> Void
+// MARK: - 6. App Entry Point
+@main
+struct EnglishChatAppApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
-    @State private var isOn: Bool
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
 
-    init(alarm: CustomAlarm, onToggle: @escaping (Bool) -> Void, onDelete: @escaping () -> Void) {
-        self.alarm = alarm
-        self.onToggle = onToggle
-        self.onDelete = onDelete
-        _isOn = State(initialValue: alarm.enabled)
+// MARK: - AppDelegate for UNUserNotificationCenterDelegate
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        requestNotificationPermission()
+        return true
     }
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: isOn ? "bell.fill" : "bell.slash")
-                .foregroundColor(isOn ? .accentColor : .secondary)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(alarm.label).font(.subheadline.weight(.semibold))
-                Text(subtitle).font(.footnote).foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-                .onChange(of: isOn) { on in onToggle(on) }
-
-            Button(role: .destructive) {
-                onDelete()
-            } label: {
-                Image(systemName: "trash.fill")
+    // 알림 권한 요청
+    func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            if granted {
+                print("Notification permission granted.")
+            } else {
+                print("Notification permission denied.")
             }
         }
-        .padding(12)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    private var subtitle: String {
-        switch alarm.kind {
-        case .daily(let t):
-            return "반복 · 매일 \(CustomAlarm.hmString(t))"
-        case .weekly(_, let wds):
-            let names = ["일","월","화","수","목","금","토"]
-            return "반복 · \(wds.sorted().map { names[$0-1] }.joined(separator: "·"))"
-        case .interval(let m):
-            return "반복 · \(m)분 간격"
+    // Foreground에서 알림이 올 때 표시
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        // 알림이 foreground에 있을 때 배너, 소리, 뱃지 표시
+        completionHandler([.banner, .sound, .badge])
+    }
+}
+
+struct ContentView: View {
+    @State private var showChatView = false
+    
+    var body: some View {
+        if showChatView {
+            ChatView(showChatView: $showChatView)
+        } else {
+            MainAlarmView(showChatView: $showChatView)
         }
     }
 }

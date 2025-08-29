@@ -10,9 +10,22 @@
 		0A5A78C62E5F472A004D148E /* SayEnglish.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SayEnglish.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		0A5A78E32E5F61EB004D148E /* Exceptions for "SayEnglish" folder in "SayEnglish" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 0A5A78C52E5F472A004D148E /* SayEnglish */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		0A5A78C82E5F472A004D148E /* SayEnglish */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				0A5A78E32E5F61EB004D148E /* Exceptions for "SayEnglish" folder in "SayEnglish" target */,
+			);
 			path = SayEnglish;
 			sourceTree = "<group>";
 		};
@@ -256,6 +269,9 @@
 				DEVELOPMENT_TEAM = 9KDUS59PR5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SayEnglish/Info.plist;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "음성 대화를 위해 마이크 사용이 필요합니다.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "영어 연습을 위하여 음성인식을 사용합니다.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -284,6 +300,9 @@
 				DEVELOPMENT_TEAM = 9KDUS59PR5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SayEnglish/Info.plist;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "음성 대화를 위해 마이크 사용이 필요합니다.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "영어 연습을 위하여 음성인식을 사용합니다.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

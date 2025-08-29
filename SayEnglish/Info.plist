@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+    
+    <!-- Info.plist -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>같은 Wi-Fi에 있는 학습 서버와 통신하기 위해 로컬 네트워크 접근이 필요합니다.</string>
+    <!-- 마이크 -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>학습을 위해 사용자의 음성을 인식합니다.</string>
+
+    <!-- 음성 인식 -->
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>사용자의 발화를 텍스트로 변환하여 대화에 사용합니다.</string>
+
+    <!-- (선택) Bonjour를 쓰지 않아도 넣어두면 iOS가 서비스 유형을 인지합니다 -->
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_http._tcp.</string>
+    </array>
+
+</dict>
+</plist>
