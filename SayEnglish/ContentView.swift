@@ -86,7 +86,8 @@ struct Alarm: Identifiable, Codable, Equatable {
         
         switch type {
         case .daily, .weekly:
-            var dateComponents = Calendar.current.dateComponents([.hour, .minute], from: time)
+            var dateComponents = Calendar.current.dateComponents([.hour, .minute, .timeZone], from: time)
+            dateComponents.timeZone = .current // Explicitly set the timezone
             
             if type == .weekly {
                 // 선택된 요일에만 알람 설정
@@ -208,6 +209,26 @@ class AudioController: NSObject, ObservableObject, SFSpeechRecognizerDelegate, A
         silenceTimer = nil
     }
 
+    // AVSpeechUtterance에 사용할 현실적인 목소리를 찾는 함수
+    private func findPreferredVoice() -> AVSpeechSynthesisVoice? {
+        // 프리미엄/향상된 품질의 미국 영어 목소리를 찾습니다.
+        let allVoices = AVSpeechSynthesisVoice.speechVoices()
+        if let premiumVoice = allVoices.first(where: {
+            $0.language == "en-US" && $0.quality == .premium
+        }) {
+            return premiumVoice
+        }
+        
+        if let enhancedVoice = allVoices.first(where: {
+            $0.language == "en-US" && $0.quality == .enhanced
+        }) {
+            return enhancedVoice
+        }
+        
+        // 프리미엄/향상된 목소리가 없으면 기본 목소리를 사용합니다.
+        return AVSpeechSynthesisVoice(language: "en-US")
+    }
+    
     func speak(_ text: String) {
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
@@ -216,7 +237,7 @@ class AudioController: NSObject, ObservableObject, SFSpeechRecognizerDelegate, A
         forceStopRecognition()
         
         let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.voice = findPreferredVoice()
         utterance.volume = 1.0
         synthesizer.speak(utterance)
     }
@@ -264,8 +285,12 @@ class AudioController: NSObject, ObservableObject, SFSpeechRecognizerDelegate, A
 // MARK: - 3. ViewModel (앱의 로직을 담당)
 class ChatViewModel: ObservableObject {
     
-    private let serverURL = "http://85bc2d4a2282.ngrok-free.app"
-    
+    #if DEBUG
+    private let serverURL = "http://85bc2d4a2282.ngrok-free.app"   // 디버그용
+    #else
+    private let serverURL = "http://13.124.208.108:2479"      // 릴리즈용(실제 서버 URL로 교체)
+    #endif
+
     @Published var messages: [ChatMessage] = []
     @Published var isLoading = false
     @Published var errorMessage: String? = nil
@@ -433,22 +458,70 @@ class AlarmManager: ObservableObject {
     }
     
     // 알람 스케줄링
+    // AlarmManager 안에 헬퍼 추가
+    private func identifiers(for alarm: Alarm) -> [String] {
+        switch alarm.type {
+        case .weekly:
+            return alarm.weekdays.map { "\(alarm.id)_w\($0)" }
+        default:
+            return [alarm.id]
+        }
+    }
+   
+
+
+    // AlarmManager 안의 함수 교체
     private func scheduleNotification(for alarm: Alarm) {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [alarm.id])
-        
+        // 기존 동일 ID 예약 제거 (weekly인 경우 관련 ID 전체 제거)
+        UNUserNotificationCenter.current()
+            .removePendingNotificationRequests(withIdentifiers: identifiers(for: alarm))
+
         guard alarm.isActive else { return }
-        
-        let request = alarm.createNotificationRequest()
-        if request.trigger != nil {
-            UNUserNotificationCenter.current().add(request) { error in
-                if let error = error {
-                    print("알림 스케줄링 실패: \(error.localizedDescription)")
-                } else {
-                    print("알람 스케줄링 성공: \(alarm.id)")
+
+        let center = UNUserNotificationCenter.current()
+
+        switch alarm.type {
+        case .weekly:
+            // ✅ 선택된 요일마다 개별 트리거 생성
+            let content = UNMutableNotificationContent()
+            content.title = "영어 대화 알람"
+            content.body = "영어 대화할 시간입니다!"
+
+            let alarmSounds = ["eng_prompt_01.wav","eng_prompt_02.wav","eng_prompt_03.wav","eng_prompt_04.wav","eng_prompt_05.wav"]
+            if let s = alarmSounds.randomElement() {
+                content.sound = UNNotificationSound(named: UNNotificationSoundName(s))
+            } else {
+                content.sound = .default
+            }
+
+            let hm = Calendar.current.dateComponents([.hour, .minute], from: alarm.time)
+
+            for wd in alarm.weekdays {
+                var dc = hm
+                dc.weekday = wd // ✅ 요일 고정
+                let trigger = UNCalendarNotificationTrigger(dateMatching: dc, repeats: true)
+                let id = "\(alarm.id)_w\(wd)" // ✅ 요일별 고유 ID
+                let req = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
+                center.add(req) { err in
+                    if let err = err { print("주간 알람 스케줄 실패(\(wd)): \(err)") }
+                }
+            }
+
+        case .daily, .interval:
+            // 기존 로직 재사용
+            let request = alarm.createNotificationRequest()
+            if request.trigger != nil {
+                center.add(request) { error in
+                    if let error = error {
+                        print("알림 스케줄링 실패: \(error.localizedDescription)")
+                    } else {
+                        print("알람 스케줄링 성공: \(alarm.id)")
+                    }
                 }
             }
         }
     }
+
 }
 
 // MARK: - 5. Views (UI 컴포넌트)
@@ -497,7 +570,7 @@ struct ChatView: View {
                 Text(error)
                     .foregroundColor(.red)
                     .padding()
-            }
+                }
             
             if viewModel.isLoading {
                 ProgressView()
@@ -717,8 +790,11 @@ struct MainAlarmView: View {
                 .frame(maxHeight: 250)
             }
             .padding()
-            .navigationTitle("메인 화면")
+            .navigationTitle("설정")
+            
         }
+        .navigationViewStyle(.stack)             // ✅ 이 줄 추가 (iPad에서도 단일 화면)
+
     }
 }
 
