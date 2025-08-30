@@ -955,7 +955,7 @@ struct MainView: View {
                 .frame(maxHeight: .infinity)
             }
             .padding()
-            .navigationTitle("설정")
+            .navigationTitle("English Bell")
             
         }
         .navigationViewStyle(.stack)
