@@ -12,7 +12,7 @@ import UserNotifications
 
 // MARK: - 1. Data Models (서버와 통신할 데이터 구조)
 // FastAPI 서버의 Pydantic 모델과 동일한 구조로 Codable을 채택합니다.
-struct ChatMessage: Identifiable, Codable {
+struct ChatMessage: Identifiable, Codable, Equatable {
     let id = UUID()
     let role: String
     let text: String
@@ -33,6 +33,19 @@ struct ReplyRequest: Codable {
 struct ReplyResponse: Codable {
     let assistant_text: String
 }
+
+// ✅ 추가: 채팅 세션 데이터 모델
+struct ChatSession: Identifiable, Codable, Equatable {
+    let id: UUID
+    let startTime: Date
+    var messages: [ChatMessage]
+    
+    // 이퀄리티 비교를 위해 Codable 채택
+    static func == (lhs: ChatSession, rhs: ChatSession) -> Bool {
+        return lhs.id == rhs.id
+    }
+}
+
 
 // 알람 데이터 모델
 struct Alarm: Identifiable, Codable, Equatable {
@@ -72,9 +85,6 @@ struct Alarm: Identifiable, Codable, Equatable {
         content.title = "영어 대화 알람"
         content.body = "영어 대화할 시간입니다!"
         
-        // 알람 소리: 사용자가 준비한 파일(conceptually)
-        // 실제 사용 시 'alarm_sound.wav' 파일을 프로젝트에 추가해야 합니다.
-        // 5가지 파일 중 랜덤하게 선택하는 로직을 위해 파일명을 배열로 관리합니다.
         let alarmSounds = ["eng_prompt_01.wav", "eng_prompt_02.wav", "eng_prompt_03.wav", "eng_prompt_04.wav", "eng_prompt_05.wav"]
         if let randomSound = alarmSounds.randomElement() {
             content.sound = UNNotificationSound(named: UNNotificationSoundName(randomSound))
@@ -87,13 +97,11 @@ struct Alarm: Identifiable, Codable, Equatable {
         switch type {
         case .daily, .weekly:
             var dateComponents = Calendar.current.dateComponents([.hour, .minute, .timeZone], from: time)
-            dateComponents.timeZone = .current // Explicitly set the timezone
+            dateComponents.timeZone = .current
             
             if type == .weekly {
-                // 선택된 요일에만 알람 설정
                 let weekday = Calendar.current.component(.weekday, from: time)
                 if !weekdays.contains(weekday) {
-                    // 선택된 요일이 아니므로 트리거를 설정하지 않음
                     return UNNotificationRequest(identifier: self.id, content: content, trigger: nil)
                 }
             }
@@ -209,9 +217,7 @@ class AudioController: NSObject, ObservableObject, SFSpeechRecognizerDelegate, A
         silenceTimer = nil
     }
 
-    // AVSpeechUtterance에 사용할 현실적인 목소리를 찾는 함수
     private func findPreferredVoice() -> AVSpeechSynthesisVoice? {
-        // 프리미엄/향상된 품질의 미국 영어 목소리를 찾습니다.
         let allVoices = AVSpeechSynthesisVoice.speechVoices()
         if let premiumVoice = allVoices.first(where: {
             $0.language == "en-US" && $0.quality == .premium
@@ -225,7 +231,6 @@ class AudioController: NSObject, ObservableObject, SFSpeechRecognizerDelegate, A
             return enhancedVoice
         }
         
-        // 프리미엄/향상된 목소리가 없으면 기본 목소리를 사용합니다.
         return AVSpeechSynthesisVoice(language: "en-US")
     }
     
@@ -286,15 +291,18 @@ class AudioController: NSObject, ObservableObject, SFSpeechRecognizerDelegate, A
 class ChatViewModel: ObservableObject {
     
     #if DEBUG
-    private let serverURL = "http://85bc2d4a2282.ngrok-free.app"   // 디버그용
+    private let serverURL = "http://85bc2d4a2282.ngrok-free.app"
     #else
-    private let serverURL = "http://13.124.208.108:2479"      // 릴리즈용(실제 서버 URL로 교체)
+    private let serverURL = "http://13.124.208.108:2479"
     #endif
 
     @Published var messages: [ChatMessage] = []
     @Published var isLoading = false
     @Published var errorMessage: String? = nil
     @Published var isChatActive: Bool = true
+    
+    // ✅ 추가: 현재 진행 중인 채팅 세션
+    @Published var currentSession: ChatSession?
 
     private var history: [ChatMessage] {
         return messages.filter { $0.role != "system" }
@@ -310,6 +318,9 @@ class ChatViewModel: ObservableObject {
 
     func startChat() {
         guard messages.isEmpty else { return }
+
+        // ✅ 추가: 새로운 채팅 세션 시작
+        self.currentSession = ChatSession(id: UUID(), startTime: Date(), messages: [])
 
         Task {
             await MainActor.run {
@@ -329,8 +340,10 @@ class ChatViewModel: ObservableObject {
                 let (data, _) = try await URLSession.shared.data(for: request)
                 let response = try JSONDecoder().decode(StartResponse.self, from: data)
                 
+                let assistantMessage = ChatMessage(role: "assistant", text: response.assistant_text)
                 await MainActor.run {
-                    self.messages.append(ChatMessage(role: "assistant", text: response.assistant_text))
+                    self.messages.append(assistantMessage)
+                    self.currentSession?.messages.append(assistantMessage) // ✅ 추가: 세션에 메시지 저장
                     self.isLoading = false
                     self.audioController.speak(response.assistant_text)
                 }
@@ -350,6 +363,7 @@ class ChatViewModel: ObservableObject {
         
         DispatchQueue.main.async {
             self.messages.append(userMessage)
+            self.currentSession?.messages.append(userMessage) // ✅ 추가: 세션에 메시지 저장
             self.isLoading = true
             self.errorMessage = nil
         }
@@ -367,10 +381,12 @@ class ChatViewModel: ObservableObject {
                 let (data, _) = try await URLSession.shared.data(for: request)
                 let response = try JSONDecoder().decode(ReplyResponse.self, from: data)
                 
+                let assistantMessage = ChatMessage(role: "assistant", text: response.assistant_text)
                 await MainActor.run {
-                    self.messages.append(ChatMessage(role: "assistant", text: response.assistant_text))
+                    self.messages.append(assistantMessage)
+                    self.currentSession?.messages.append(assistantMessage) // ✅ 추가: 세션에 메시지 저장
                     self.isLoading = false
-                    self.audioController.speak(response.assistant_text)
+                    self.audioController.speak(assistantMessage.text)
                 }
             } catch {
                 await MainActor.run {
@@ -394,24 +410,75 @@ class ChatViewModel: ObservableObject {
     }
 }
 
-// MARK: - 4. Alarm Manager
-class AlarmManager: ObservableObject {
-    @Published var alarms: [Alarm] = []
+// MARK: - 4. Alarm & History Manager
+// ✅ AlarmManager와 ChatHistoryManager를 하나로 합쳐서 관리 효율을 높입니다.
+class ChatHistoryManager: ObservableObject {
     
+    private let chatSessionsKey = "savedChatSessions"
+    private let maxSessions = 5
+
+    @Published var alarms: [Alarm] = []
     private let alarmsKey = "savedAlarms"
+    
+    @Published var chatSessions: [ChatSession] = []
     
     init() {
         loadAlarms()
+        loadChatSessions()
     }
     
-    // UserDefaults에 알람 저장
+    // MARK: - Chat History Management
+    
+    // UserDefaults에서 채팅 기록 불러오기
+    func loadChatSessions() {
+        if let savedSessions = UserDefaults.standard.data(forKey: chatSessionsKey) {
+            if let decodedSessions = try? JSONDecoder().decode([ChatSession].self, from: savedSessions) {
+                self.chatSessions = decodedSessions.sorted(by: { $0.startTime > $1.startTime })
+                return
+            }
+        }
+        self.chatSessions = []
+    }
+    
+    // 새로운 채팅 세션 저장 (5개 제한)
+    func saveChatSession(_ session: ChatSession) {
+        // 이미 존재하는 세션이 아닌지 확인
+        if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
+            chatSessions[index] = session
+        } else {
+            // 새로운 세션 추가
+            chatSessions.insert(session, at: 0)
+        }
+        
+        // 5개 초과 시 가장 오래된 것 삭제
+        if chatSessions.count > maxSessions {
+            chatSessions.removeLast()
+        }
+        
+        saveChatSessions()
+    }
+    
+    // UserDefaults에 채팅 기록 저장
+    func saveChatSessions() {
+        if let encoded = try? JSONEncoder().encode(chatSessions) {
+            UserDefaults.standard.set(encoded, forKey: chatSessionsKey)
+        }
+    }
+    
+    // 특정 채팅 세션 삭제
+    func deleteChatSession(id: UUID) {
+        chatSessions.removeAll(where: { $0.id == id })
+        saveChatSessions()
+    }
+    
+    // MARK: - Alarm Management
+    
     private func saveAlarms() {
         if let encoded = try? JSONEncoder().encode(alarms) {
             UserDefaults.standard.set(encoded, forKey: alarmsKey)
         }
     }
     
-    // UserDefaults에서 알람 불러오기
     private func loadAlarms() {
         if let savedAlarms = UserDefaults.standard.data(forKey: alarmsKey) {
             if let decodedAlarms = try? JSONDecoder().decode([Alarm].self, from: savedAlarms) {
@@ -422,13 +489,10 @@ class AlarmManager: ObservableObject {
         self.alarms = []
     }
     
-    // 알람 추가
     func addAlarm(alarm: Alarm) {
-        // 최대 5개 알람 제한
         guard alarms.count < 5 else { return }
         
         var newAlarm = alarm
-        // id가 비어있을 경우에만 새로운 id 생성
         if newAlarm.id.isEmpty {
             newAlarm.id = UUID().uuidString
         }
@@ -437,7 +501,6 @@ class AlarmManager: ObservableObject {
         saveAlarms()
     }
     
-    // 알람 활성화/비활성화
     func toggleAlarm(id: String) {
         if let index = alarms.firstIndex(where: { $0.id == id }) {
             alarms[index].isActive.toggle()
@@ -450,15 +513,12 @@ class AlarmManager: ObservableObject {
         }
     }
     
-    // 알람 삭제
     func deleteAlarm(id: String) {
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [id])
         alarms.removeAll(where: { $0.id == id })
         saveAlarms()
     }
     
-    // 알람 스케줄링
-    // AlarmManager 안에 헬퍼 추가
     private func identifiers(for alarm: Alarm) -> [String] {
         switch alarm.type {
         case .weekly:
@@ -467,48 +527,42 @@ class AlarmManager: ObservableObject {
             return [alarm.id]
         }
     }
-   
-
-
-    // AlarmManager 안의 함수 교체
+    
     private func scheduleNotification(for alarm: Alarm) {
-        // 기존 동일 ID 예약 제거 (weekly인 경우 관련 ID 전체 제거)
         UNUserNotificationCenter.current()
             .removePendingNotificationRequests(withIdentifiers: identifiers(for: alarm))
-
+        
         guard alarm.isActive else { return }
-
+        
         let center = UNUserNotificationCenter.current()
-
+        
         switch alarm.type {
         case .weekly:
-            // ✅ 선택된 요일마다 개별 트리거 생성
             let content = UNMutableNotificationContent()
             content.title = "영어 대화 알람"
             content.body = "영어 대화할 시간입니다!"
-
+            
             let alarmSounds = ["eng_prompt_01.wav","eng_prompt_02.wav","eng_prompt_03.wav","eng_prompt_04.wav","eng_prompt_05.wav"]
             if let s = alarmSounds.randomElement() {
                 content.sound = UNNotificationSound(named: UNNotificationSoundName(s))
             } else {
                 content.sound = .default
             }
-
+            
             let hm = Calendar.current.dateComponents([.hour, .minute], from: alarm.time)
-
+            
             for wd in alarm.weekdays {
                 var dc = hm
-                dc.weekday = wd // ✅ 요일 고정
+                dc.weekday = wd
                 let trigger = UNCalendarNotificationTrigger(dateMatching: dc, repeats: true)
-                let id = "\(alarm.id)_w\(wd)" // ✅ 요일별 고유 ID
+                let id = "\(alarm.id)_w\(wd)"
                 let req = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
                 center.add(req) { err in
                     if let err = err { print("주간 알람 스케줄 실패(\(wd)): \(err)") }
                 }
             }
-
+            
         case .daily, .interval:
-            // 기존 로직 재사용
             let request = alarm.createNotificationRequest()
             if request.trigger != nil {
                 center.add(request) { error in
@@ -521,19 +575,24 @@ class AlarmManager: ObservableObject {
             }
         }
     }
-
 }
+
 
 // MARK: - 5. Views (UI 컴포넌트)
 // 기존 대화 화면
 struct ChatView: View {
     @StateObject private var viewModel = ChatViewModel()
     @Binding var showChatView: Bool
+    @EnvironmentObject var historyManager: ChatHistoryManager // ✅ 추가
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Button(action: {
+                    // ✅ 수정: 나가기 전에 대화 세션 저장
+                    if let session = viewModel.currentSession, !session.messages.isEmpty {
+                        historyManager.saveChatSession(session)
+                    }
                     withAnimation {
                         showChatView = false
                         viewModel.endChat()
@@ -665,14 +724,83 @@ struct AudioControlView: View {
     }
 }
 
-// 새로운 메인 알람 화면
-struct MainAlarmView: View {
+// ✅ 대화 기록 재생(TTS)만 추가한 DetailedChatView
+struct DetailedChatView: View {
+    let session: ChatSession
+    @Environment(\.dismiss) var dismiss
+    
+    // 로컬 TTS 전용 합성기 (ChatViewModel에 의존 X)
+    @State private var synthesizer = AVSpeechSynthesizer()
+    
+    // 상세뷰 전용 보이스 선택
+    private func preferredVoice() -> AVSpeechSynthesisVoice? {
+        // premium → enhanced → 기본(en-US) 우선
+        if let v = AVSpeechSynthesisVoice.speechVoices().first(where: { $0.language == "en-US" && $0.quality == .premium }) {
+            return v
+        }
+        if let v = AVSpeechSynthesisVoice.speechVoices().first(where: { $0.language == "en-US" && $0.quality == .enhanced }) {
+            return v
+        }
+        return AVSpeechSynthesisVoice(language: "en-US")
+    }
+    
+    private func speak(_ text: String) {
+        if synthesizer.isSpeaking {
+            synthesizer.stopSpeaking(at: .immediate)
+        }
+        let u = AVSpeechUtterance(string: text)
+        u.voice = preferredVoice()
+        u.volume = 1.0
+        synthesizer.speak(u)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button(action: { dismiss() }) {
+                    Image(systemName: "chevron.left")
+                        .foregroundColor(.blue)
+                }
+                .padding(.horizontal)
+                
+                Spacer()
+                Text("English Tutor")
+                    .font(.headline)
+                Spacer()
+            }
+            .padding(.top)
+            .padding(.bottom, 5)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 15) {
+                    ForEach(session.messages) { message in
+                        // ✅ 여기만 변경: 스피커 탭 시 TTS 재생
+                        MessageView(message: message) {
+                            if message.role == "assistant" {
+                                speak(message.text)
+                            }
+                        }
+                    }
+                }
+                .padding()
+            }
+            .background(Color(.systemGray6))
+        }
+        .navigationTitle(Text(session.startTime, format: .dateTime.hour().minute().day().month()))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+
+
+// ✅ 기존 MainAlarmView를 대체할 MainView
+struct MainView: View {
     @State private var selectedTab: AlarmType = .daily
     @State private var selectedTime = Date()
     @State private var selectedWeekdays: Set<Int> = []
     @State private var selectedInterval: Double = 30 // 분 단위
     
-    @StateObject private var alarmManager = AlarmManager()
+    @EnvironmentObject var historyManager: ChatHistoryManager // ✅ 추가
     
     @Binding var showChatView: Bool
     
@@ -702,7 +830,7 @@ struct MainAlarmView: View {
                             } else {
                                 newAlarm = Alarm(id: "", type: selectedTab, time: selectedTime, weekdays: selectedWeekdays, interval: nil, isActive: true)
                             }
-                            alarmManager.addAlarm(alarm: newAlarm)
+                            historyManager.addAlarm(alarm: newAlarm)
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -762,22 +890,22 @@ struct MainAlarmView: View {
                 .foregroundColor(.white)
                 .cornerRadius(15)
                 
-                // 알람 목록
+                // 알람 목록 및 채팅 기록 목록
                 List {
                     Section(header: Text("내 알람 목록 (최대 5개)").font(.headline)) {
-                        ForEach(alarmManager.alarms) { alarm in
+                        ForEach(historyManager.alarms) { alarm in
                             HStack {
                                 Text(alarm.description)
                                 Spacer()
                                 Toggle("", isOn: Binding(
                                     get: { alarm.isActive },
-                                    set: { _ in alarmManager.toggleAlarm(id: alarm.id) }
+                                    set: { _ in historyManager.toggleAlarm(id: alarm.id) }
                                 ))
                                 .labelsHidden()
                                 .tint(.green)
                                 
                                 Button {
-                                    alarmManager.deleteAlarm(id: alarm.id)
+                                    historyManager.deleteAlarm(id: alarm.id)
                                 } label: {
                                     Image(systemName: "trash.fill")
                                         .foregroundColor(.red)
@@ -785,27 +913,50 @@ struct MainAlarmView: View {
                             }
                         }
                     }
+                    
+                    // ✅ 추가: 채팅 기록 목록
+                    Section(header: Text("대화 기록 (최대 5개)").font(.headline)) {
+                        ForEach(historyManager.chatSessions) { session in
+                            NavigationLink(destination: DetailedChatView(session: session)) {
+                                Text(session.startTime, format: .dateTime.hour().minute().day().month())
+                                    .font(.headline)
+                            }
+                        }
+                        .onDelete { indexSet in
+                            indexSet.forEach { index in
+                                let sessionId = historyManager.chatSessions[index].id
+                                historyManager.deleteChatSession(id: sessionId)
+                            }
+                        }
+                    }
                 }
                 .listStyle(.insetGrouped)
-                .frame(maxHeight: 250)
+                .frame(maxHeight: .infinity)
             }
             .padding()
             .navigationTitle("설정")
             
         }
-        .navigationViewStyle(.stack)             // ✅ 이 줄 추가 (iPad에서도 단일 화면)
-
+        .navigationViewStyle(.stack)
+        .onAppear {
+            historyManager.loadChatSessions()
+        }
     }
 }
+
 
 // MARK: - 6. App Entry Point
 @main
 struct EnglishChatAppApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    
+    // ✅ 추가: 앱 전체에서 공유할 ChatHistoryManager
+    @StateObject private var historyManager = ChatHistoryManager()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(historyManager) // ✅ 추가: 환경 객체로 주입
         }
     }
 }
@@ -831,7 +982,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     // Foreground에서 알림이 올 때 표시
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        // 알림이 foreground에 있을 때 배너, 소리, 뱃지 표시
         completionHandler([.banner, .sound, .badge])
     }
 }
@@ -843,7 +993,7 @@ struct ContentView: View {
         if showChatView {
             ChatView(showChatView: $showChatView)
         } else {
-            MainAlarmView(showChatView: $showChatView)
+            MainView(showChatView: $showChatView)
         }
     }
 }
