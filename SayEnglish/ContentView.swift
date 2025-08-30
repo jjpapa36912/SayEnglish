@@ -34,17 +34,18 @@ struct ReplyResponse: Codable {
     let assistant_text: String
 }
 
-// ✅ 추가: 채팅 세션 데이터 모델
+// ✅ 기존 ChatSession 교체
 struct ChatSession: Identifiable, Codable, Equatable {
     let id: UUID
     let startTime: Date
     var messages: [ChatMessage]
-    
-    // 이퀄리티 비교를 위해 Codable 채택
+    var totalSeconds: Int? = 0   // ✅ 총 대화시간(초) 저장
+
     static func == (lhs: ChatSession, rhs: ChatSession) -> Bool {
         return lhs.id == rhs.id
     }
 }
+
 
 
 // 알람 데이터 모델
@@ -583,21 +584,31 @@ class ChatHistoryManager: ObservableObject {
 
 
 // MARK: - 5. Views (UI 컴포넌트)
-// 기존 대화 화면
+// ✅ 기존 ChatView 전체 교체
 struct ChatView: View {
     @StateObject private var viewModel = ChatViewModel()
     @Binding var showChatView: Bool
-    @EnvironmentObject var historyManager: ChatHistoryManager // ✅ 추가
+    @EnvironmentObject var historyManager: ChatHistoryManager
+
+    // ✅ 타이머 상태
+    @State private var elapsedSec = 0
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    private func fmt(_ sec: Int) -> String {
+        let m = sec / 60, s = sec % 60
+        return String(format: "%02d:%02d", m, s)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Button(action: {
-                    // ✅ 수정: 나가기 전에 대화 세션 저장
+                    // ✅ 나가기 전에 세션 저장 + 시간 기록
                     if let session = viewModel.currentSession, !session.messages.isEmpty {
-                        historyManager.saveChatSession(session)
+                        viewModel.currentSession?.totalSeconds = elapsedSec
+                        historyManager.saveChatSession(viewModel.currentSession!)
                     }
-                    // ✅ 화면 전환 직전에 반드시 음성 중지
+                    // ✅ 음성 즉시 중지
                     viewModel.audioController.stopSpeaking()
                     withAnimation {
                         showChatView = false
@@ -608,11 +619,17 @@ struct ChatView: View {
                         .foregroundColor(.blue)
                 }
                 .padding(.horizontal)
-                
+
                 Spacer()
                 Text("English Tutor")
                     .font(.headline)
                 Spacer()
+
+                // ✅ 우측 상단 타이머
+                Text(fmt(elapsedSec))
+                    .font(.footnote.monospacedDigit())
+                    .foregroundColor(.secondary)
+                    .padding(.trailing, 12)
             }
             .padding(.top)
             .padding(.bottom, 5)
@@ -630,30 +647,44 @@ struct ChatView: View {
                 .padding()
             }
             .background(Color(.systemGray6))
-            
+
             if let error = viewModel.errorMessage {
                 Text(error)
                     .foregroundColor(.red)
                     .padding()
-                }
-            
+            }
+
             if viewModel.isLoading {
                 ProgressView()
                     .padding()
             }
-            
+
             AudioControlView(viewModel: viewModel)
                 .padding()
                 .background(Color(.systemBackground))
         }
         .onAppear {
+            // ✅ 새 대화 시작 시 타이머 리셋
+            elapsedSec = 0
             viewModel.startChat()
         }
         .onDisappear {
-                    viewModel.audioController.stopSpeaking()
-                }
+            // ✅ 화면 떠날 때도 TTS 중지만 (저장은 위 버튼에서 처리)
+            viewModel.audioController.stopSpeaking()
+        }
+        // ✅ 1초마다 경과 시간 증가 (대화 중일 때만)
+        .onReceive(timer) { _ in
+            if viewModel.isChatActive {
+                elapsedSec += 1
+            }
+        }
+        // ✅ 재개 버튼으로 대화 재시작할 때 타이머 리셋
+        .onChange(of: viewModel.isChatActive) { isActive in
+            if isActive { elapsedSec = 0 }
+        }
     }
 }
+
 
 struct MessageView: View {
     let message: ChatMessage
@@ -815,26 +846,29 @@ struct DetailedChatView: View {
 
 
 // ✅ 기존 MainAlarmView를 대체할 MainView
+// ✅ 기존 MainView 전체 교체
 struct MainView: View {
     @State private var selectedTab: AlarmType = .daily
     @State private var selectedTime = Date()
     @State private var selectedWeekdays: Set<Int> = []
     @State private var selectedInterval: Double = 30 // 분 단위
-    
-    @EnvironmentObject var historyManager: ChatHistoryManager // ✅ 추가
-    
+
+    @EnvironmentObject var historyManager: ChatHistoryManager
     @Binding var showChatView: Bool
-    
-    // 요일 선택
+
     let weekdays = ["일", "월", "화", "수", "목", "금", "토"]
-    
+
+    private func formatDuration(_ sec: Int) -> String {
+        let m = sec / 60, s = sec % 60
+        return String(format: "%02d:%02d", m, s)
+    }
+
     var body: some View {
         NavigationView {
             VStack(spacing: 20) {
-                // 상단 컨트롤 영역
+                // (상단 컨트롤 영역 동일)
                 VStack(spacing: 15) {
                     HStack {
-                        // 매일/요일별 탭
                         Picker("알람 유형", selection: $selectedTab) {
                             Text(AlarmType.daily.rawValue).tag(AlarmType.daily)
                             Text(AlarmType.weekly.rawValue).tag(AlarmType.weekly)
@@ -842,8 +876,7 @@ struct MainView: View {
                         }
                         .pickerStyle(.segmented)
                         .frame(maxWidth: .infinity)
-                        
-                        // 알람 저장 버튼
+
                         Button("저장") {
                             let newAlarm: Alarm
                             if selectedTab == .interval {
@@ -863,7 +896,6 @@ struct MainView: View {
                                 .datePickerStyle(.wheel)
                                 .frame(height: 100)
                         }
-                        
                         if selectedTab == .weekly {
                             HStack(spacing: 10) {
                                 ForEach(1..<8) { weekday in
@@ -882,7 +914,6 @@ struct MainView: View {
                                 }
                             }
                         }
-                        
                         if selectedTab == .interval {
                             VStack(alignment: .leading) {
                                 Text("알람 주기 (\(Int(selectedInterval))분)")
@@ -893,25 +924,20 @@ struct MainView: View {
                         }
                     }
                     .frame(maxWidth: .infinity)
-                    
                 }
                 .padding()
                 .background(Color(.systemGray6))
                 .cornerRadius(15)
-                
-                // 대화하기 버튼
+
                 Button("대화하기") {
-                    withAnimation {
-                        showChatView = true
-                    }
+                    withAnimation { showChatView = true }
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
                 .background(Color.green)
                 .foregroundColor(.white)
                 .cornerRadius(15)
-                
-                // 알람 목록 및 채팅 기록 목록
+
                 List {
                     Section(header: Text("내 알람 목록 (최대 5개)").font(.headline)) {
                         ForEach(historyManager.alarms) { alarm in
@@ -924,7 +950,7 @@ struct MainView: View {
                                 ))
                                 .labelsHidden()
                                 .tint(.green)
-                                
+
                                 Button {
                                     historyManager.deleteAlarm(id: alarm.id)
                                 } label: {
@@ -934,13 +960,19 @@ struct MainView: View {
                             }
                         }
                     }
-                    
-                    // ✅ 추가: 채팅 기록 목록
+
+                    // ✅ 대화 기록에 총 대화시간 표시
                     Section(header: Text("대화 기록 (최대 5개)").font(.headline)) {
                         ForEach(historyManager.chatSessions) { session in
                             NavigationLink(destination: DetailedChatView(session: session)) {
-                                Text(session.startTime, format: .dateTime.hour().minute().day().month())
-                                    .font(.headline)
+                                HStack {
+                                    Text(session.startTime, format: .dateTime.hour().minute().day().month())
+                                        .font(.headline)
+                                    Spacer()
+                                    Text(formatDuration(session.totalSeconds ?? 0))
+                                        .font(.subheadline.monospacedDigit())
+                                        .foregroundColor(.secondary)
+                                }
                             }
                         }
                         .onDelete { indexSet in
@@ -956,7 +988,6 @@ struct MainView: View {
             }
             .padding()
             .navigationTitle("English Bell")
-            
         }
         .navigationViewStyle(.stack)
         .onAppear {
@@ -964,6 +995,7 @@ struct MainView: View {
         }
     }
 }
+
 
 
 // MARK: - 6. App Entry Point
