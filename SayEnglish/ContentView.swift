@@ -845,8 +845,8 @@ struct DetailedChatView: View {
 
 
 
-// ✅ 기존 MainAlarmView를 대체할 MainView
-// ✅ 기존 MainView 전체 교체
+// ✅ 최종 MainView
+// ✅ 분리된 컨트롤 구조 적용 MainView (전체 교체)
 struct MainView: View {
     @State private var selectedTab: AlarmType = .daily
     @State private var selectedTime = Date()
@@ -858,51 +858,105 @@ struct MainView: View {
 
     let weekdays = ["일", "월", "화", "수", "목", "금", "토"]
 
-    private func formatDuration(_ sec: Int) -> String {
+    @State private var now = Date()
+    private let minuteTicker = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+
+    private func mmss(_ sec: Int) -> String {
         let m = sec / 60, s = sec % 60
         return String(format: "%02d:%02d", m, s)
     }
 
     var body: some View {
         NavigationView {
-            VStack(spacing: 20) {
-                // (상단 컨트롤 영역 동일)
-                VStack(spacing: 15) {
-                    HStack {
-                        Picker("알람 유형", selection: $selectedTab) {
-                            Text(AlarmType.daily.rawValue).tag(AlarmType.daily)
-                            Text(AlarmType.weekly.rawValue).tag(AlarmType.weekly)
-                            Text(AlarmType.interval.rawValue).tag(AlarmType.interval)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: .infinity)
+            VStack(spacing: 16) {
+                // 상단 바: 타이틀 + 우측 상단 히스토리 아이콘
+                HStack {
+                    Text("English Bell")
+                        .font(.largeTitle.bold())
+                        .foregroundColor(.primary)
 
-                        Button("저장") {
-                            let newAlarm: Alarm
-                            if selectedTab == .interval {
-                                newAlarm = Alarm(id: "", type: .interval, time: Date(), weekdays: [], interval: Int(selectedInterval), isActive: true)
-                            } else {
-                                newAlarm = Alarm(id: "", type: selectedTab, time: selectedTime, weekdays: selectedWeekdays, interval: nil, isActive: true)
-                            }
-                            historyManager.addAlarm(alarm: newAlarm)
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
                     Spacer()
-                    VStack(alignment: .leading, spacing: 10) {
-                        if selectedTab == .daily || selectedTab == .weekly {
-                            DatePicker("시간 선택", selection: $selectedTime, displayedComponents: .hourAndMinute)
+
+                    NavigationLink {
+                        DailyHistoryView()
+                    } label: {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.title2)
+                            .foregroundColor(.purple)
+                            .padding(8)
+                            .background(Color.purple.opacity(0.15), in: Circle())
+                    }
+                }
+                .padding(.horizontal)
+
+                // ✅ [컨트롤 카드] 탭 + 저장 버튼 (시간 피커와 완전 분리)
+                HStack(spacing: 12) {
+                    Picker("알람 유형", selection: $selectedTab) {
+                        Text(AlarmType.daily.rawValue).tag(AlarmType.daily)
+                        Text(AlarmType.weekly.rawValue).tag(AlarmType.weekly)
+                        Text(AlarmType.interval.rawValue).tag(AlarmType.interval)
+                    }
+                    .pickerStyle(.segmented)
+
+                    Button("저장") {
+                        let newAlarm: Alarm
+                        if selectedTab == .interval {
+                            newAlarm = Alarm(
+                                id: "",
+                                type: .interval,
+                                time: Date(),
+                                weekdays: [],
+                                interval: Int(selectedInterval),
+                                isActive: true
+                            )
+                        } else {
+                            newAlarm = Alarm(
+                                id: "",
+                                type: selectedTab,
+                                time: selectedTime,
+                                weekdays: selectedWeekdays,
+                                interval: nil,
+                                isActive: true
+                            )
+                        }
+                        historyManager.addAlarm(alarm: newAlarm)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(15)
+                .padding(.horizontal)
+
+                // ✅ [설정 카드] 시간 피커 / 요일 토글 / 주기 슬라이더
+                VStack(alignment: .leading, spacing: 12) {
+                    if selectedTab == .daily || selectedTab == .weekly {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("시간 선택")
+                                .font(.headline)
+                            DatePicker("", selection: $selectedTime, displayedComponents: .hourAndMinute)
                                 .labelsHidden()
                                 .datePickerStyle(.wheel)
                                 .frame(height: 100)
                         }
-                        if selectedTab == .weekly {
+                    }
+
+                    if selectedTab == .weekly {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("요일 선택")
+                                .font(.headline)
                             HStack(spacing: 10) {
                                 ForEach(1..<8) { weekday in
                                     Text(weekdays[weekday - 1])
                                         .frame(width: 30, height: 30)
-                                        .background(selectedWeekdays.contains(weekday) ? Color.blue : Color(.systemGray5))
-                                        .foregroundColor(selectedWeekdays.contains(weekday) ? .white : .black)
+                                        .background(
+                                            selectedWeekdays.contains(weekday)
+                                                ? Color.blue
+                                                : Color(.systemGray5)
+                                        )
+                                        .foregroundColor(
+                                            selectedWeekdays.contains(weekday) ? .white : .black
+                                        )
                                         .cornerRadius(15)
                                         .onTapGesture {
                                             if selectedWeekdays.contains(weekday) {
@@ -914,21 +968,23 @@ struct MainView: View {
                                 }
                             }
                         }
-                        if selectedTab == .interval {
-                            VStack(alignment: .leading) {
-                                Text("알람 주기 (\(Int(selectedInterval))분)")
-                                    .font(.headline)
-                                Slider(value: $selectedInterval, in: 5...60, step: 5)
-                                    .tint(.green)
-                            }
+                    }
+
+                    if selectedTab == .interval {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("알람 주기 (\(Int(selectedInterval))분)")
+                                .font(.headline)
+                            Slider(value: $selectedInterval, in: 5...60, step: 5)
+                                .tint(.green)
                         }
                     }
-                    .frame(maxWidth: .infinity)
                 }
                 .padding()
                 .background(Color(.systemGray6))
                 .cornerRadius(15)
+                .padding(.horizontal)
 
+                // 대화하기 버튼
                 Button("대화하기") {
                     withAnimation { showChatView = true }
                 }
@@ -937,17 +993,40 @@ struct MainView: View {
                 .background(Color.green)
                 .foregroundColor(.white)
                 .cornerRadius(15)
+                .padding(.horizontal)
 
+                // 오늘 진행 프로그레스바 (보라 그라데이션)
+                let todaySeconds = historyManager.seconds(for: now)
+                let progress = min(Double(todaySeconds) / 3600.0, 1.0)
+
+                VStack(spacing: 8) {
+                    HStack {
+                        Text("오늘 대화")
+                            .font(.headline)
+                        Spacer()
+                        Text("\(mmss(todaySeconds)) / 60:00")
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundColor(.secondary)
+                    }
+                    GradientProgressBar(progress: progress)
+                        .frame(height: 16)
+                }
+                .padding(.horizontal)
+
+                // 알람/대화 기록 리스트
                 List {
                     Section(header: Text("내 알람 목록 (최대 5개)").font(.headline)) {
                         ForEach(historyManager.alarms) { alarm in
                             HStack {
                                 Text(alarm.description)
                                 Spacer()
-                                Toggle("", isOn: Binding(
-                                    get: { alarm.isActive },
-                                    set: { _ in historyManager.toggleAlarm(id: alarm.id) }
-                                ))
+                                Toggle(
+                                    "",
+                                    isOn: Binding(
+                                        get: { alarm.isActive },
+                                        set: { _ in historyManager.toggleAlarm(id: alarm.id) }
+                                    )
+                                )
                                 .labelsHidden()
                                 .tint(.green)
 
@@ -961,7 +1040,6 @@ struct MainView: View {
                         }
                     }
 
-                    // ✅ 대화 기록에 총 대화시간 표시
                     Section(header: Text("대화 기록 (최대 5개)").font(.headline)) {
                         ForEach(historyManager.chatSessions) { session in
                             NavigationLink(destination: DetailedChatView(session: session)) {
@@ -969,7 +1047,7 @@ struct MainView: View {
                                     Text(session.startTime, format: .dateTime.hour().minute().day().month())
                                         .font(.headline)
                                     Spacer()
-                                    Text(formatDuration(session.totalSeconds ?? 0))
+                                    Text(mmss(session.totalSeconds ?? 0))
                                         .font(.subheadline.monospacedDigit())
                                         .foregroundColor(.secondary)
                                 }
@@ -986,16 +1064,217 @@ struct MainView: View {
                 .listStyle(.insetGrouped)
                 .frame(maxHeight: .infinity)
             }
-            .padding()
-            .navigationTitle("English Bell")
+            .padding(.top)
         }
         .navigationViewStyle(.stack)
         .onAppear {
             historyManager.loadChatSessions()
+            now = Date()
+        }
+        .onReceive(minuteTicker) { _ in
+            now = Date()
         }
     }
 }
 
+
+
+
+// ✅ 추가: 보라 그라데이션 프로그레스바
+struct GradientProgressBar: View {
+    let progress: Double // 0.0 ~ 1.0
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = max(0, min(1, progress)) * geo.size.width
+            ZStack(alignment: .leading) {
+                // 트랙
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                    )
+                // 채워진 부분
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.purple, Color.indigo],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    )
+                    .frame(width: width)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .strokeBorder(Color.white.opacity(0.2))
+                    )
+            }
+        }
+        .frame(height: 16)
+    }
+}
+
+// ✅ ChatHistoryManager에 유틸 추가
+extension ChatHistoryManager {
+    /// 해당 날짜(현지 기준) 누적 초
+    func seconds(for date: Date) -> Int {
+        let cal = Calendar.current
+        return chatSessions.reduce(0) { acc, s in
+            cal.isDate(s.startTime, inSameDayAs: date) ? acc + (s.totalSeconds ?? 0) : acc
+        }
+    }
+
+    /// 날짜별 누적 초 목록 (최신 날짜 우선)
+    func dailyTotals() -> [(date: Date, seconds: Int)] {
+        let cal = Calendar.current
+        var bucket: [Date: Int] = [:] // key = startOfDay
+        for s in chatSessions {
+            let day = cal.startOfDay(for: s.startTime)
+            bucket[day, default: 0] += (s.totalSeconds ?? 0)
+        }
+        return bucket
+            .map { ($0.key, $0.value) }
+            .sorted { $0.0 > $1.0 }
+    }
+}
+
+// ✅ 새로 추가: DailyHistoryView
+// ✅ 기존 DailyHistoryView 전체 교체(보라 그라데이션 + 카드형 셀)
+struct DailyHistoryView: View {
+    @EnvironmentObject var historyManager: ChatHistoryManager
+    @Environment(\.dismiss) var dismiss
+
+    // 최근 N일 필터 (원하면 7/30일 토글)
+    @State private var dayWindow: Int = 30
+
+    private func mmss(_ sec: Int) -> String {
+        let m = sec / 60, s = sec % 60
+        return String(format: "%02d:%02d", m, s)
+    }
+
+    private var filteredTotals: [(date: Date, seconds: Int)] {
+        let all = historyManager.dailyTotals()
+        guard dayWindow > 0 else { return all }
+        let cal = Calendar.current
+        let cutoff = cal.date(byAdding: .day, value: -dayWindow + 1, to: cal.startOfDay(for: Date())) ?? Date.distantPast
+        return all.filter { $0.date >= cutoff }
+    }
+
+    var body: some View {
+        ZStack {
+            // ✅ 배경 보라 그라데이션
+            LinearGradient(
+                colors: [Color.purple.opacity(0.9), Color.indigo.opacity(0.9)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // 상단 커스텀 바
+                HStack(spacing: 12) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.title3.weight(.semibold))
+                            .foregroundColor(.white)
+                            .padding(8)
+                            .background(Color.white.opacity(0.15), in: Circle())
+                    }
+
+                    Spacer()
+
+                    Text("히스토리")
+                        .font(.headline)
+                        .foregroundColor(.white)
+
+                    Spacer()
+
+                    // 오른쪽 여백 정렬용
+                    Color.clear.frame(width: 36, height: 36)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+                // 기간 선택 (선택사항)
+                HStack(spacing: 8) {
+                    ForEach([7, 14, 30], id: \.self) { d in
+                        Button {
+                            dayWindow = d
+                        } label: {
+                            Text("\(d)일")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(dayWindow == d ? .purple : .white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(Color.white.opacity(dayWindow == d ? 0.95 : 0.18))
+                                )
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+
+                // 내용 카드 리스트
+                ScrollView {
+                    VStack(spacing: 14) {
+                        ForEach(filteredTotals, id: \.date) { (day, seconds) in
+                            let progress = min(Double(seconds) / 3600.0, 1.0)
+
+                            // 카드 셀
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(day, format: .dateTime.year().month().day())
+                                        .font(.headline)
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    Text("\(mmss(seconds)) / 60:00")
+                                        .font(.subheadline.monospacedDigit())
+                                        .foregroundColor(.secondary)
+                                }
+
+                                GradientProgressBar(progress: progress)
+                                    .frame(height: 16)
+                            }
+                            .padding(16)
+                            .background(
+                                // 유리 카드 느낌
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(.thinMaterial)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                                    )
+                            )
+                            .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 6)
+                            .padding(.horizontal, 16)
+                        }
+
+                        // 빈 상태 안내
+                        if filteredTotals.isEmpty {
+                            VStack(spacing: 8) {
+                                Image(systemName: "bubble.left.and.bubble.right")
+                                    .font(.system(size: 42))
+                                    .foregroundColor(.white.opacity(0.8))
+                                Text("아직 대화 기록이 없어요")
+                                    .foregroundColor(.white.opacity(0.95))
+                                Text("오늘부터 60분 목표를 채워보세요!")
+                                    .foregroundColor(.white.opacity(0.8))
+                                    .font(.subheadline)
+                            }
+                            .padding(.top, 40)
+                        }
+                    }
+                    .padding(.vertical, 12)
+                }
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+    }
+}
 
 
 // MARK: - 6. App Entry Point
