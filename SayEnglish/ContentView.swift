@@ -148,7 +148,11 @@ class AudioController: NSObject, ObservableObject, SFSpeechRecognizerDelegate, A
         synthesizer.delegate = self
         requestAuthorization()
     }
-    
+    func stopSpeaking() {
+            if synthesizer.isSpeaking {
+                synthesizer.stopSpeaking(at: .immediate)
+            }
+        }
     deinit {
         silenceTimer?.invalidate()
     }
@@ -593,6 +597,8 @@ struct ChatView: View {
                     if let session = viewModel.currentSession, !session.messages.isEmpty {
                         historyManager.saveChatSession(session)
                     }
+                    // ✅ 화면 전환 직전에 반드시 음성 중지
+                    viewModel.audioController.stopSpeaking()
                     withAnimation {
                         showChatView = false
                         viewModel.endChat()
@@ -643,6 +649,9 @@ struct ChatView: View {
         .onAppear {
             viewModel.startChat()
         }
+        .onDisappear {
+                    viewModel.audioController.stopSpeaking()
+                }
     }
 }
 
@@ -757,7 +766,13 @@ struct DetailedChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Button(action: { dismiss() }) {
+                Button(action: {
+                    // ✅ 뒤로 가기 직전 중지(체감 즉시)
+                                        if synthesizer.isSpeaking {
+                                            synthesizer.stopSpeaking(at: .immediate)
+                                        }
+                    
+                    dismiss() }) {
                     Image(systemName: "chevron.left")
                         .foregroundColor(.blue)
                 }
@@ -788,6 +803,12 @@ struct DetailedChatView: View {
         }
         .navigationTitle(Text(session.startTime, format: .dateTime.hour().minute().day().month()))
         .navigationBarTitleDisplayMode(.inline)
+        // ✅ 네비게이션 등 어떤 이유로든 화면이 사라질 때도 보장
+                .onDisappear {
+                    if synthesizer.isSpeaking {
+                        synthesizer.stopSpeaking(at: .immediate)
+                    }
+                }
     }
 }
 
