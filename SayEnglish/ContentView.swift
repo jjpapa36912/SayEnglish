@@ -409,10 +409,12 @@ class ChatViewModel: ObservableObject {
     }
     
     func resumeChat() {
-        self.isChatActive = true
-        self.messages = []
-        self.startChat()
-    }
+            // ✅ 기존 메시지 유지하고 대화만 다시 활성화
+            self.isChatActive = true
+
+            // ✅ 음성 인식 재시작 (새 /chat/start 호출 X)
+            try? self.audioController.startRecognition()
+        }
 }
 //
 //// MARK: - 4. Alarm & History Manager
@@ -590,13 +592,13 @@ class ChatViewModel: ObservableObject {
 
 
 // MARK: - 5. Views (UI 컴포넌트)
-// ✅ 기존 ChatView 전체 교체
+// ✅ ChatView 전체 교체
 struct ChatView: View {
     @StateObject private var viewModel = ChatViewModel()
     @Binding var showChatView: Bool
     @EnvironmentObject var historyManager: ChatHistoryManager
 
-    // ✅ 타이머 상태
+    // 타이머 상태
     @State private var elapsedSec = 0
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -607,14 +609,15 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // 상단 바
             HStack {
                 Button(action: {
-                    // ✅ 나가기 전에 세션 저장 + 시간 기록
-                    if let session = viewModel.currentSession, !session.messages.isEmpty {
-                        viewModel.currentSession?.totalSeconds = elapsedSec
-                        historyManager.saveChatSession(viewModel.currentSession!)
+                    // 나가기 전: 세션 저장(총 대화시간 포함) + 음성 중지
+                    if var session = viewModel.currentSession, !session.messages.isEmpty {
+                        session.totalSeconds = elapsedSec
+                        viewModel.currentSession = session
+                        historyManager.saveChatSession(session)
                     }
-                    // ✅ 음성 즉시 중지
                     viewModel.audioController.stopSpeaking()
                     withAnimation {
                         showChatView = false
@@ -631,7 +634,7 @@ struct ChatView: View {
                     .font(.headline)
                 Spacer()
 
-                // ✅ 우측 상단 타이머
+                // 우측 상단 타이머 표시
                 Text(fmt(elapsedSec))
                     .font(.footnote.monospacedDigit())
                     .foregroundColor(.secondary)
@@ -640,6 +643,7 @@ struct ChatView: View {
             .padding(.top)
             .padding(.bottom, 5)
 
+            // 메시지 리스트
             ScrollView {
                 VStack(alignment: .leading, spacing: 15) {
                     ForEach(viewModel.messages) { message in
@@ -654,40 +658,45 @@ struct ChatView: View {
             }
             .background(Color(.systemGray6))
 
+            // 에러/로딩
             if let error = viewModel.errorMessage {
                 Text(error)
                     .foregroundColor(.red)
                     .padding()
             }
-
             if viewModel.isLoading {
                 ProgressView()
                     .padding()
             }
 
+            // 하단 컨트롤 (X = 일시정지 / 재개)
             AudioControlView(viewModel: viewModel)
                 .padding()
                 .background(Color(.systemBackground))
         }
         .onAppear {
-            // ✅ 새 대화 시작 시 타이머 리셋
-            elapsedSec = 0
-            viewModel.startChat()
+            // 화면 첫 진입: 완전 새 대화라면 타이머 0부터 + /chat/start 호출
+            if viewModel.messages.isEmpty {
+                elapsedSec = 0
+                viewModel.startChat()
+            } else {
+                // 이전 대화가 남아있는 상태로 진입했다면(이 화면을 유지한 채 재표시 등)
+                // 타이머 유지 + 음성만 재개
+                viewModel.isChatActive = true
+                try? viewModel.audioController.startRecognition()
+            }
         }
         .onDisappear {
-            // ✅ 화면 떠날 때도 TTS 중지만 (저장은 위 버튼에서 처리)
+            // 다른 화면으로 나갈 때는 TTS만 즉시 중지
             viewModel.audioController.stopSpeaking()
         }
-        // ✅ 1초마다 경과 시간 증가 (대화 중일 때만)
+        // 1초마다 경과시간 증가(대화 활성 상태에서만)
         .onReceive(timer) { _ in
             if viewModel.isChatActive {
                 elapsedSec += 1
             }
         }
-        // ✅ 재개 버튼으로 대화 재시작할 때 타이머 리셋
-        .onChange(of: viewModel.isChatActive) { isActive in
-            if isActive { elapsedSec = 0 }
-        }
+        // ❌ 재개 시 타이머를 리셋하는 코드(예: onChange에서 elapsedSec=0)는 두지 않습니다.
     }
 }
 
