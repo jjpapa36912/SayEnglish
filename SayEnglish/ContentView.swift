@@ -414,179 +414,179 @@ class ChatViewModel: ObservableObject {
         self.startChat()
     }
 }
-
-// MARK: - 4. Alarm & History Manager
-// ✅ AlarmManager와 ChatHistoryManager를 하나로 합쳐서 관리 효율을 높입니다.
-class ChatHistoryManager: ObservableObject {
-    
-    private let chatSessionsKey = "savedChatSessions"
-    private let maxSessions = 5
-
-    @Published var alarms: [Alarm] = []
-    private let alarmsKey = "savedAlarms"
-    
-    @Published var chatSessions: [ChatSession] = []
-    
-    init() {
-        loadAlarms()
-        loadChatSessions()
-    }
-    
-    // MARK: - Chat History Management
-    
-    // UserDefaults에서 채팅 기록 불러오기
-    func loadChatSessions() {
-        if let savedSessions = UserDefaults.standard.data(forKey: chatSessionsKey) {
-            if let decodedSessions = try? JSONDecoder().decode([ChatSession].self, from: savedSessions) {
-                self.chatSessions = decodedSessions.sorted(by: { $0.startTime > $1.startTime })
-                return
-            }
-        }
-        self.chatSessions = []
-    }
-    
-    // 새로운 채팅 세션 저장 (5개 제한)
-    func saveChatSession(_ session: ChatSession) {
-        // 이미 존재하는 세션이 아닌지 확인
-        if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
-            chatSessions[index] = session
-        } else {
-            // 새로운 세션 추가
-            chatSessions.insert(session, at: 0)
-        }
-        
-        // 5개 초과 시 가장 오래된 것 삭제
-        if chatSessions.count > maxSessions {
-            chatSessions.removeLast()
-        }
-        
-        saveChatSessions()
-    }
-    
-    // UserDefaults에 채팅 기록 저장
-    func saveChatSessions() {
-        if let encoded = try? JSONEncoder().encode(chatSessions) {
-            UserDefaults.standard.set(encoded, forKey: chatSessionsKey)
-        }
-    }
-    
-    // 특정 채팅 세션 삭제
-    func deleteChatSession(id: UUID) {
-        chatSessions.removeAll(where: { $0.id == id })
-        saveChatSessions()
-    }
-    
-    // MARK: - Alarm Management
-    
-    private func saveAlarms() {
-        if let encoded = try? JSONEncoder().encode(alarms) {
-            UserDefaults.standard.set(encoded, forKey: alarmsKey)
-        }
-    }
-    
-    private func loadAlarms() {
-        if let savedAlarms = UserDefaults.standard.data(forKey: alarmsKey) {
-            if let decodedAlarms = try? JSONDecoder().decode([Alarm].self, from: savedAlarms) {
-                self.alarms = decodedAlarms
-                return
-            }
-        }
-        self.alarms = []
-    }
-    
-    // ✅ 교체: ChatHistoryManager.addAlarm(alarm:) → Bool 반환
-    func addAlarm(alarm: Alarm) -> Bool {
-        // 최대 5개 제한
-        guard alarms.count < 5 else {
-            return false
-        }
-
-        var newAlarm = alarm
-        if newAlarm.id.isEmpty {
-            newAlarm.id = UUID().uuidString
-        }
-        alarms.append(newAlarm)
-        scheduleNotification(for: newAlarm)
-        saveAlarms()
-        return true
-    }
-
-    
-    func toggleAlarm(id: String) {
-        if let index = alarms.firstIndex(where: { $0.id == id }) {
-            alarms[index].isActive.toggle()
-            if alarms[index].isActive {
-                scheduleNotification(for: alarms[index])
-            } else {
-                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [alarms[index].id])
-            }
-            saveAlarms()
-        }
-    }
-    
-    func deleteAlarm(id: String) {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [id])
-        alarms.removeAll(where: { $0.id == id })
-        saveAlarms()
-    }
-    
-    private func identifiers(for alarm: Alarm) -> [String] {
-        switch alarm.type {
-        case .weekly:
-            return alarm.weekdays.map { "\(alarm.id)_w\($0)" }
-        default:
-            return [alarm.id]
-        }
-    }
-    
-    private func scheduleNotification(for alarm: Alarm) {
-        UNUserNotificationCenter.current()
-            .removePendingNotificationRequests(withIdentifiers: identifiers(for: alarm))
-        
-        guard alarm.isActive else { return }
-        
-        let center = UNUserNotificationCenter.current()
-        
-        switch alarm.type {
-        case .weekly:
-            let content = UNMutableNotificationContent()
-            content.title = "영어 대화 알람"
-            content.body = "영어 대화할 시간입니다!"
-            
-            let alarmSounds = ["eng_prompt_01.wav","eng_prompt_02.wav","eng_prompt_03.wav","eng_prompt_04.wav","eng_prompt_05.wav"]
-            if let s = alarmSounds.randomElement() {
-                content.sound = UNNotificationSound(named: UNNotificationSoundName(s))
-            } else {
-                content.sound = .default
-            }
-            
-            let hm = Calendar.current.dateComponents([.hour, .minute], from: alarm.time)
-            
-            for wd in alarm.weekdays {
-                var dc = hm
-                dc.weekday = wd
-                let trigger = UNCalendarNotificationTrigger(dateMatching: dc, repeats: true)
-                let id = "\(alarm.id)_w\(wd)"
-                let req = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
-                center.add(req) { err in
-                    if let err = err { print("주간 알람 스케줄 실패(\(wd)): \(err)") }
-                }
-            }
-            
-        case .daily, .interval:
-            let request = alarm.createNotificationRequest()
-            if request.trigger != nil {
-                center.add(request) { error in
-                    if let error = error {
-                        print("알림 스케줄링 실패: \(error.localizedDescription)")
-                    } else {
-                        print("알람 스케줄링 성공: \(alarm.id)")
-                    }
-                }
-            }
-        }
-    }
-}
+//
+//// MARK: - 4. Alarm & History Manager
+//// ✅ AlarmManager와 ChatHistoryManager를 하나로 합쳐서 관리 효율을 높입니다.
+//class ChatHistoryManager: ObservableObject {
+//    
+//    private let chatSessionsKey = "savedChatSessions"
+//    private let maxSessions = 5
+//
+//    @Published var alarms: [Alarm] = []
+//    private let alarmsKey = "savedAlarms"
+//    
+//    @Published var chatSessions: [ChatSession] = []
+//    
+//    init() {
+//        loadAlarms()
+//        loadChatSessions()
+//    }
+//    
+//    // MARK: - Chat History Management
+//    
+//    // UserDefaults에서 채팅 기록 불러오기
+//    func loadChatSessions() {
+//        if let savedSessions = UserDefaults.standard.data(forKey: chatSessionsKey) {
+//            if let decodedSessions = try? JSONDecoder().decode([ChatSession].self, from: savedSessions) {
+//                self.chatSessions = decodedSessions.sorted(by: { $0.startTime > $1.startTime })
+//                return
+//            }
+//        }
+//        self.chatSessions = []
+//    }
+//    
+//    // 새로운 채팅 세션 저장 (5개 제한)
+//    func saveChatSession(_ session: ChatSession) {
+//        // 이미 존재하는 세션이 아닌지 확인
+//        if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
+//            chatSessions[index] = session
+//        } else {
+//            // 새로운 세션 추가
+//            chatSessions.insert(session, at: 0)
+//        }
+//        
+//        // 5개 초과 시 가장 오래된 것 삭제
+//        if chatSessions.count > maxSessions {
+//            chatSessions.removeLast()
+//        }
+//        
+//        saveChatSessions()
+//    }
+//    
+//    // UserDefaults에 채팅 기록 저장
+//    func saveChatSessions() {
+//        if let encoded = try? JSONEncoder().encode(chatSessions) {
+//            UserDefaults.standard.set(encoded, forKey: chatSessionsKey)
+//        }
+//    }
+//    
+//    // 특정 채팅 세션 삭제
+//    func deleteChatSession(id: UUID) {
+//        chatSessions.removeAll(where: { $0.id == id })
+//        saveChatSessions()
+//    }
+//    
+//    // MARK: - Alarm Management
+//    
+//    private func saveAlarms() {
+//        if let encoded = try? JSONEncoder().encode(alarms) {
+//            UserDefaults.standard.set(encoded, forKey: alarmsKey)
+//        }
+//    }
+//    
+//    private func loadAlarms() {
+//        if let savedAlarms = UserDefaults.standard.data(forKey: alarmsKey) {
+//            if let decodedAlarms = try? JSONDecoder().decode([Alarm].self, from: savedAlarms) {
+//                self.alarms = decodedAlarms
+//                return
+//            }
+//        }
+//        self.alarms = []
+//    }
+//    
+//    // ✅ 교체: ChatHistoryManager.addAlarm(alarm:) → Bool 반환
+//    func addAlarm(alarm: Alarm) -> Bool {
+//        // 최대 5개 제한
+//        guard alarms.count < 5 else {
+//            return false
+//        }
+//
+//        var newAlarm = alarm
+//        if newAlarm.id.isEmpty {
+//            newAlarm.id = UUID().uuidString
+//        }
+//        alarms.append(newAlarm)
+//        scheduleNotification(for: newAlarm)
+//        saveAlarms()
+//        return true
+//    }
+//
+//    
+//    func toggleAlarm(id: String) {
+//        if let index = alarms.firstIndex(where: { $0.id == id }) {
+//            alarms[index].isActive.toggle()
+//            if alarms[index].isActive {
+//                scheduleNotification(for: alarms[index])
+//            } else {
+//                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [alarms[index].id])
+//            }
+//            saveAlarms()
+//        }
+//    }
+//    
+//    func deleteAlarm(id: String) {
+//        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [id])
+//        alarms.removeAll(where: { $0.id == id })
+//        saveAlarms()
+//    }
+//    
+//    private func identifiers(for alarm: Alarm) -> [String] {
+//        switch alarm.type {
+//        case .weekly:
+//            return alarm.weekdays.map { "\(alarm.id)_w\($0)" }
+//        default:
+//            return [alarm.id]
+//        }
+//    }
+//    
+//    private func scheduleNotification(for alarm: Alarm) {
+//        UNUserNotificationCenter.current()
+//            .removePendingNotificationRequests(withIdentifiers: identifiers(for: alarm))
+//        
+//        guard alarm.isActive else { return }
+//        
+//        let center = UNUserNotificationCenter.current()
+//        
+//        switch alarm.type {
+//        case .weekly:
+//            let content = UNMutableNotificationContent()
+//            content.title = "영어 대화 알람"
+//            content.body = "영어 대화할 시간입니다!"
+//            
+//            let alarmSounds = ["eng_prompt_01.wav","eng_prompt_02.wav","eng_prompt_03.wav","eng_prompt_04.wav","eng_prompt_05.wav"]
+//            if let s = alarmSounds.randomElement() {
+//                content.sound = UNNotificationSound(named: UNNotificationSoundName(s))
+//            } else {
+//                content.sound = .default
+//            }
+//            
+//            let hm = Calendar.current.dateComponents([.hour, .minute], from: alarm.time)
+//            
+//            for wd in alarm.weekdays {
+//                var dc = hm
+//                dc.weekday = wd
+//                let trigger = UNCalendarNotificationTrigger(dateMatching: dc, repeats: true)
+//                let id = "\(alarm.id)_w\(wd)"
+//                let req = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
+//                center.add(req) { err in
+//                    if let err = err { print("주간 알람 스케줄 실패(\(wd)): \(err)") }
+//                }
+//            }
+//            
+//        case .daily, .interval:
+//            let request = alarm.createNotificationRequest()
+//            if request.trigger != nil {
+//                center.add(request) { error in
+//                    if let error = error {
+//                        print("알림 스케줄링 실패: \(error.localizedDescription)")
+//                    } else {
+//                        print("알람 스케줄링 성공: \(alarm.id)")
+//                    }
+//                }
+//            }
+//        }
+//    }
+//}
 
 
 // MARK: - 5. Views (UI 컴포넌트)
@@ -853,6 +853,7 @@ struct DetailedChatView: View {
 
 // ✅ 세련된 메인 화면 (전체 교체)
 // ✅ 세련 디자인 + 알람 5개 제한 팝업 포함 MainView (전체 교체)
+// ✅ 세련 디자인 + 알람 5개 제한 팝업 포함 MainView (세션 목록은 별도 페이지로 이동)
 struct MainView: View {
     @State private var selectedTab: AlarmType = .daily
     @State private var selectedTime = Date()
@@ -862,14 +863,11 @@ struct MainView: View {
     @EnvironmentObject var historyManager: ChatHistoryManager
     @Binding var showChatView: Bool
 
-    // 요일 라벨
     private let weekdays = ["일","월","화","수","목","금","토"]
 
-    // 자정 리셋용
     @State private var now = Date()
     private let minuteTicker = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
-    // 알람 5개 초과 팝업
     @State private var showAlarmLimitAlert = false
 
     private func mmss(_ sec: Int) -> String {
@@ -879,7 +877,6 @@ struct MainView: View {
 
     var body: some View {
         ZStack {
-            // 배경 그라데이션
             LinearGradient(
                 colors: [Color.purple.opacity(0.25), Color.indigo.opacity(0.25)],
                 startPoint: .topLeading, endPoint: .bottomTrailing
@@ -890,14 +887,15 @@ struct MainView: View {
                 ScrollView {
                     VStack(spacing: 18) {
 
-                        // 상단 바 (타이틀 + 히스토리 아이콘)
-                        HStack {
+                        // 상단 바: 타이틀 + [히스토리] [세션] 아이콘
+                        HStack(spacing: 10) {
                             Text("English Bell")
                                 .font(.largeTitle.bold())
                                 .foregroundColor(.primary)
 
                             Spacer()
 
+                            // 히스토리(일자별 누적)
                             NavigationLink {
                                 DailyHistoryView()
                             } label: {
@@ -908,11 +906,33 @@ struct MainView: View {
                                     .background(Color.white.opacity(0.55), in: Circle())
                             }
                             .accessibilityLabel("히스토리")
+                            // ✅ 새로: 날짜 목록 페이지로 이동
+                                NavigationLink {
+                                    DatesListView()
+                                } label: {
+                                    Image(systemName: "calendar")
+                                        .font(.title3.weight(.semibold))
+                                        .foregroundColor(.purple)
+                                        .padding(8)
+                                        .background(Color.white.opacity(0.55), in: Circle())
+                                }
+                                .accessibilityLabel("날짜별 목록")
+                            // ✅ 세션 목록(최근 대화 기록 페이지)
+//                            NavigationLink {
+//                                SessionsListView()
+//                            } label: {
+//                                Image(systemName: "list.bullet.rectangle")
+//                                    .font(.title3.weight(.semibold))
+//                                    .foregroundColor(.purple)
+//                                    .padding(8)
+//                                    .background(Color.white.opacity(0.55), in: Circle())
+//                            }
+//                            .accessibilityLabel("세션 목록")
                         }
                         .padding(.horizontal, 16)
                         .padding(.top, 6)
 
-                        // 카드 1: 탭 + 저장 (시간 피커와 완전 분리)
+                        // 카드 1: 탭 + 저장
                         SectionCard {
                             HStack(spacing: 12) {
                                 Picker("알람 유형", selection: $selectedTab) {
@@ -933,7 +953,7 @@ struct MainView: View {
                                                          time: selectedTime, weekdays: selectedWeekdays,
                                                          interval: nil, isActive: true)
                                     }
-                                    let ok = historyManager.addAlarm(alarm: newAlarm) // ← Bool 반환 버전 사용
+                                    let ok = historyManager.addAlarm(alarm: newAlarm) // Bool 반환 필수
                                     if !ok { showAlarmLimitAlert = true }
                                 } label: {
                                     Text("저장").font(.headline)
@@ -942,7 +962,7 @@ struct MainView: View {
                             }
                         }
 
-                        // 카드 2: 상세 설정 (선택된 탭에 따라 UI 전환)
+                        // 카드 2: 상세 설정
                         SectionCard(spacing: 14) {
                             if selectedTab == .daily || selectedTab == .weekly {
                                 VStack(alignment: .leading, spacing: 8) {
@@ -979,7 +999,7 @@ struct MainView: View {
                             }
                         }
 
-                        // 대화하기 버튼 (그라데이션 프라이머리 버튼)
+                        // 대화하기 버튼
                         Button {
                             withAnimation { showChatView = true }
                         } label: {
@@ -1001,7 +1021,7 @@ struct MainView: View {
                         }
                         .padding(.horizontal, 16)
 
-                        // 오늘 진행 (보라 그라데이션 프로그레스바)
+                        // 오늘 진행
                         let todaySeconds = historyManager.seconds(for: now)
                         let progress = min(Double(todaySeconds) / 3600.0, 1.0)
 
@@ -1019,8 +1039,7 @@ struct MainView: View {
                                     .frame(height: 16)
                             }
                         }
-
-                        // 알람/대화 기록 리스트 (글래스 카드)
+                        // ✅ 알람 저장 목록 카드 (오늘 대화 카드 아래에 추가)
                         SectionCard {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("내 알람 목록 (최대 5개)")
@@ -1058,34 +1077,8 @@ struct MainView: View {
                             }
                         }
 
-                        SectionCard {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("대화 기록 (최대 5개)")
-                                    .font(.headline)
 
-                                if historyManager.chatSessions.isEmpty {
-                                    Text("대화 기록이 없습니다.")
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    ForEach(historyManager.chatSessions) { session in
-                                        NavigationLink(destination: DetailedChatView(session: session)) {
-                                            HStack {
-                                                Text(session.startTime, format: .dateTime.hour().minute().day().month())
-                                                    .font(.subheadline)
-                                                Spacer()
-                                                Text(mmss(session.totalSeconds ?? 0))
-                                                    .font(.subheadline.monospacedDigit())
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                            .contentShape(Rectangle())
-                                        }
-                                        .padding(.vertical, 6)
-
-                                        Divider().opacity(0.15)
-                                    }
-                                }
-                            }
-                        }
+                        // ✅ 하단 “대화 기록” 섹션은 제거됨 (SessionsListView로 이동)
 
                         Spacer(minLength: 10)
                     }
@@ -1103,7 +1096,7 @@ struct MainView: View {
                 .navigationBarHidden(true)
             }
         }
-        .alert("저장할 수 없어요", isPresented: $showAlarmLimitAlert) {
+        .alert("저장할 수 없어요😂", isPresented: $showAlarmLimitAlert) {
             Button("확인", role: .cancel) { }
         } message: {
             Text("알람은 최대 5개까지 저장할 수 있어요.")
@@ -1112,10 +1105,9 @@ struct MainView: View {
 }
 
 //
-// MARK: - Reusable UI (같은 파일에 붙여넣어 사용)
+// MARK: - Reusable UI
 //
 
-/// 글래스 카드
 fileprivate struct SectionCard<Content: View>: View {
     var spacing: CGFloat = 12
     @ViewBuilder var content: () -> Content
@@ -1138,10 +1130,9 @@ fileprivate struct SectionCard<Content: View>: View {
     }
 }
 
-/// 요일 선택: 항상 1줄, 가로 스크롤
 fileprivate struct FlowWeekdays: View {
-    let labels: [String]            // ["일","월","화","수","목","금","토"]
-    @Binding var selected: Set<Int> // 1~7
+    let labels: [String]
+    @Binding var selected: Set<Int>
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -1169,6 +1160,87 @@ fileprivate struct FlowWeekdays: View {
         .frame(maxWidth: .infinity)
     }
 }
+
+
+// ✅ 새로 추가: 세션 목록 페이지 (뒤로가기 포함)
+struct SessionsListView: View {
+    @EnvironmentObject var historyManager: ChatHistoryManager
+    @Environment(\.dismiss) var dismiss
+
+    private func mmss(_ sec: Int) -> String {
+        let m = sec / 60, s = sec % 60
+        return String(format: "%02d:%02d", m, s)
+    }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color.purple.opacity(0.9), Color.indigo.opacity(0.9)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // 상단 바
+                HStack(spacing: 12) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.title3.weight(.semibold))
+                            .foregroundColor(.white)
+                            .padding(8)
+                            .background(Color.white.opacity(0.15), in: Circle())
+                    }
+
+                    Spacer()
+
+                    Text("세션 목록")
+                        .font(.headline)
+                        .foregroundColor(.white)
+
+                    Spacer()
+
+                    Color.clear.frame(width: 36, height: 36)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+                // 리스트 (최신 우선, 최대 5개는 저장 정책에 의해 자동 제한)
+                List {
+                    ForEach(historyManager.chatSessions) { session in
+                        NavigationLink(destination: DetailedChatView(session: session)) {
+                            HStack {
+                                Text(session.startTime, format: .dateTime.hour().minute().day().month())
+                                    .font(.subheadline)
+                                Spacer()
+                                Text(mmss(session.totalSeconds ?? 0))
+                                    .font(.subheadline.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                        }
+                    }
+                    .onDelete { indexSet in
+                        indexSet.forEach { idx in
+                            let id = historyManager.chatSessions[idx].id
+                            historyManager.deleteChatSession(id: id)
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+    }
+}
+
+
+//
+// MARK: - Reusable UI (같은 파일에 붙여넣어 사용)
+//
+
 
 
 //
@@ -1302,29 +1374,348 @@ struct GradientProgressBar: View {
     }
 }
 
-// ✅ ChatHistoryManager에 유틸 추가
-extension ChatHistoryManager {
-    /// 해당 날짜(현지 기준) 누적 초
-    func seconds(for date: Date) -> Int {
-        let cal = Calendar.current
-        return chatSessions.reduce(0) { acc, s in
-            cal.isDate(s.startTime, inSameDayAs: date) ? acc + (s.totalSeconds ?? 0) : acc
+// ✅ 교체: ChatHistoryManager (세션은 '최근 10일'만 유지, 하루 내 세션은 무제한)
+class ChatHistoryManager: ObservableObject {
+    private let chatSessionsKey = "savedChatSessions"
+    private let keepDays = 10                          // ✅ 최근 10일 유지
+
+    @Published var alarms: [Alarm] = []
+    private let alarmsKey = "savedAlarms"
+
+    @Published var chatSessions: [ChatSession] = []
+
+    init() {
+        loadAlarms()
+        loadChatSessions()
+    }
+
+    // MARK: - Chat History Management
+    func loadChatSessions() {
+        if let savedSessions = UserDefaults.standard.data(forKey: chatSessionsKey),
+           let decoded = try? JSONDecoder().decode([ChatSession].self, from: savedSessions) {
+            self.chatSessions = decoded
+        } else {
+            self.chatSessions = []
+        }
+        pruneToLastDays() // ✅ 로드하면서 10일 이내만 남기기
+        self.chatSessions.sort { $0.startTime > $1.startTime }
+    }
+
+    func saveChatSession(_ session: ChatSession) {
+        if let idx = chatSessions.firstIndex(where: { $0.id == session.id }) {
+            chatSessions[idx] = session
+        } else {
+            chatSessions.insert(session, at: 0) // 최신 먼저
+        }
+        pruneToLastDays() // ✅ 저장할 때마다 10일 초과분 제거
+        persistChatSessions()
+    }
+
+    func deleteChatSession(id: UUID) {
+        chatSessions.removeAll { $0.id == id }
+        persistChatSessions()
+    }
+
+    private func persistChatSessions() {
+        if let encoded = try? JSONEncoder().encode(chatSessions) {
+            UserDefaults.standard.set(encoded, forKey: chatSessionsKey)
         }
     }
 
-    /// 날짜별 누적 초 목록 (최신 날짜 우선)
+    /// ✅ 최근 10일만 남기기 (startOfDay 기준)
+    private func pruneToLastDays() {
+        let cal = Calendar.current
+        let startToday = cal.startOfDay(for: Date())
+        guard let cutoff = cal.date(byAdding: .day, value: -(keepDays - 1), to: startToday) else { return }
+        chatSessions = chatSessions.filter { s in
+            cal.startOfDay(for: s.startTime) >= cutoff
+        }
+    }
+
+    // MARK: - Aggregations (오늘 합계 및 날짜별 합계)
+    /// 특정 날짜(현지) 총 누적 초
+    func seconds(for date: Date) -> Int {
+        let cal = Calendar.current
+        let sod = cal.startOfDay(for: date)
+        let eod = cal.date(byAdding: .day, value: 1, to: sod)!
+        return chatSessions.reduce(0) { acc, s in
+            (s.startTime >= sod && s.startTime < eod) ? acc + (s.totalSeconds ?? 0) : acc
+        }
+    }
+
+    /// 최근 10일의 날짜별 총합 (최신 날짜 우선)
     func dailyTotals() -> [(date: Date, seconds: Int)] {
         let cal = Calendar.current
         var bucket: [Date: Int] = [:] // key = startOfDay
+
         for s in chatSessions {
             let day = cal.startOfDay(for: s.startTime)
             bucket[day, default: 0] += (s.totalSeconds ?? 0)
         }
+        // 이미 prune되어 10일 이내만 있음
         return bucket
             .map { ($0.key, $0.value) }
             .sorted { $0.0 > $1.0 }
     }
+
+    /// 특정 날짜의 세션 리스트(최신 우선)
+    func sessions(on date: Date) -> [ChatSession] {
+        let cal = Calendar.current
+        return chatSessions
+            .filter { cal.isDate($0.startTime, inSameDayAs: date) }
+            .sorted { $0.startTime > $1.startTime }
+    }
+
+    // MARK: - Alarm Management (기존 그대로)
+    private func saveAlarms() {
+        if let encoded = try? JSONEncoder().encode(alarms) {
+            UserDefaults.standard.set(encoded, forKey: alarmsKey)
+        }
+    }
+
+    private func loadAlarms() {
+        if let savedAlarms = UserDefaults.standard.data(forKey: alarmsKey),
+           let decoded = try? JSONDecoder().decode([Alarm].self, from: savedAlarms) {
+            self.alarms = decoded
+        } else {
+            self.alarms = []
+        }
+    }
+
+    /// ⚠️ addAlarm은 이전 답변처럼 Bool 반환으로 이미 바꿨다는 전제 (5개 제한 유지)
+    func addAlarm(alarm: Alarm) -> Bool {
+        guard alarms.count < 5 else { return false }
+        var newAlarm = alarm
+        if newAlarm.id.isEmpty { newAlarm.id = UUID().uuidString }
+        alarms.append(newAlarm)
+        scheduleNotification(for: newAlarm)
+        saveAlarms()
+        return true
+    }
+
+    func toggleAlarm(id: String) {
+        if let index = alarms.firstIndex(where: { $0.id == id }) {
+            alarms[index].isActive.toggle()
+            if alarms[index].isActive {
+                scheduleNotification(for: alarms[index])
+            } else {
+                UNUserNotificationCenter.current()
+                    .removePendingNotificationRequests(withIdentifiers: [alarms[index].id])
+            }
+            saveAlarms()
+        }
+    }
+
+    func deleteAlarm(id: String) {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [id])
+        alarms.removeAll(where: { $0.id == id })
+        saveAlarms()
+    }
+
+    private func identifiers(for alarm: Alarm) -> [String] {
+        switch alarm.type {
+        case .weekly:
+            return alarm.weekdays.map { "\(alarm.id)_w\($0)" }
+        default:
+            return [alarm.id]
+        }
+    }
+
+    private func scheduleNotification(for alarm: Alarm) {
+        UNUserNotificationCenter.current()
+            .removePendingNotificationRequests(withIdentifiers: identifiers(for: alarm))
+        guard alarm.isActive else { return }
+
+        let center = UNUserNotificationCenter.current()
+
+        switch alarm.type {
+        case .weekly:
+            let content = UNMutableNotificationContent()
+            content.title = "영어 대화 알람"
+            content.body = "영어 대화할 시간입니다!"
+            let alarmSounds = ["eng_prompt_01.wav","eng_prompt_02.wav","eng_prompt_03.wav","eng_prompt_04.wav","eng_prompt_05.wav"]
+            content.sound = alarmSounds.randomElement().map { UNNotificationSound(named: UNNotificationSoundName($0)) } ?? .default
+
+            let hm = Calendar.current.dateComponents([.hour, .minute], from: alarm.time)
+            for wd in alarm.weekdays {
+                var dc = hm; dc.weekday = wd
+                let trigger = UNCalendarNotificationTrigger(dateMatching: dc, repeats: true)
+                let id = "\(alarm.id)_w\(wd)"
+                center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger)) { err in
+                    if let err = err { print("주간 알람 스케줄 실패(\(wd)): \(err)") }
+                }
+            }
+
+        case .daily, .interval:
+            let request = alarm.createNotificationRequest()
+            if request.trigger != nil {
+                center.add(request) { error in
+                    if let error = error { print("알림 스케줄링 실패: \(error.localizedDescription)") }
+                }
+            }
+        }
+    }
 }
+// ✅ 새 페이지 1: 날짜 목록 (최근 10일, 합계와 진행률 표시)
+struct DatesListView: View {
+    @EnvironmentObject var historyManager: ChatHistoryManager
+    @Environment(\.dismiss) var dismiss
+
+    private func mmss(_ sec: Int) -> String {
+        let m = sec / 60, s = sec % 60
+        return String(format: "%02d:%02d", m, s)
+    }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color.purple.opacity(0.9), Color.indigo.opacity(0.9)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // 상단 바
+                HStack(spacing: 12) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.title3.weight(.semibold))
+                            .foregroundColor(.white)
+                            .padding(8)
+                            .background(Color.white.opacity(0.15), in: Circle())
+                    }
+                    Spacer()
+                    Text("날짜별 기록")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Spacer()
+                    Color.clear.frame(width: 36, height: 36)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+                // 날짜 리스트
+                ScrollView {
+                    VStack(spacing: 14) {
+                        ForEach(historyManager.dailyTotals(), id: \.date) { (day, seconds) in
+                            let progress = min(Double(seconds) / 3600.0, 1.0)
+                            NavigationLink {
+                                SessionsByDateView(date: day)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    HStack {
+                                        Text(day, format: .dateTime.year().month().day())
+                                            .font(.headline)
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                        Text("\(mmss(seconds)) / 60:00")
+                                            .font(.subheadline.monospacedDigit())
+                                            .foregroundColor(.secondary)
+                                    }
+                                    GradientProgressBar(progress: progress)
+                                        .frame(height: 16)
+                                }
+                                .padding(16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(.thinMaterial)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 16)
+                                                .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                                        )
+                                )
+                                .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 6)
+                                .padding(.horizontal, 16)
+                            }
+                        }
+
+                        if historyManager.dailyTotals().isEmpty {
+                            VStack(spacing: 8) {
+                                Image(systemName: "calendar.badge.clock")
+                                    .font(.system(size: 42))
+                                    .foregroundColor(.white.opacity(0.85))
+                                Text("표시할 날짜가 없어요")
+                                    .foregroundColor(.white.opacity(0.95))
+                                Text("대화를 시작해 기록을 쌓아보세요!")
+                                    .foregroundColor(.white.opacity(0.85))
+                                    .font(.subheadline)
+                            }
+                            .padding(.top, 40)
+                        }
+                    }
+                    .padding(.vertical, 12)
+                }
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+    }
+}
+
+// ✅ 새 페이지 2: 특정 날짜의 세션 목록
+struct SessionsByDateView: View {
+    let date: Date
+    @EnvironmentObject var historyManager: ChatHistoryManager
+    @Environment(\.dismiss) var dismiss
+
+    private func mmss(_ sec: Int) -> String {
+        let m = sec / 60, s = sec % 60
+        return String(format: "%02d:%02d", m, s)
+    }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color.purple.opacity(0.9), Color.indigo.opacity(0.9)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // 상단 바
+                HStack(spacing: 12) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.title3.weight(.semibold))
+                            .foregroundColor(.white)
+                            .padding(8)
+                            .background(Color.white.opacity(0.15), in: Circle())
+                    }
+                    Spacer()
+                    Text(date, format: .dateTime.year().month().day())
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Spacer()
+                    Color.clear.frame(width: 36, height: 36)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+                // 세션 리스트
+                List {
+                    ForEach(historyManager.sessions(on: date)) { session in
+                        NavigationLink(destination: DetailedChatView(session: session)) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(session.startTime, format: .dateTime.hour().minute())
+                                    .font(.subheadline)
+                                Text(mmss(session.totalSeconds ?? 0))
+                                    .font(.subheadline.monospacedDigit())
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                        }
+                    }
+                    .onDelete { indexSet in
+                        indexSet.forEach { idx in
+                            let id = historyManager.sessions(on: date)[idx].id
+                            historyManager.deleteChatSession(id: id)
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+    }
+}
+
 
 // ✅ 새로 추가: DailyHistoryView
 // ✅ 기존 DailyHistoryView 전체 교체(보라 그라데이션 + 카드형 셀)
