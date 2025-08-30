@@ -845,19 +845,20 @@ struct DetailedChatView: View {
 
 
 
-// ✅ 최종 MainView
-// ✅ 분리된 컨트롤 구조 적용 MainView (전체 교체)
+// ✅ 세련된 메인 화면 (전체 교체)
 struct MainView: View {
     @State private var selectedTab: AlarmType = .daily
     @State private var selectedTime = Date()
     @State private var selectedWeekdays: Set<Int> = []
-    @State private var selectedInterval: Double = 30 // 분 단위
+    @State private var selectedInterval: Double = 30
 
     @EnvironmentObject var historyManager: ChatHistoryManager
     @Binding var showChatView: Bool
 
-    let weekdays = ["일", "월", "화", "수", "목", "금", "토"]
+    // 요일 라벨
+    private let weekdays = ["일","월","화","수","목","금","토"]
 
+    // 자정 리셋용
     @State private var now = Date()
     private let minuteTicker = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
@@ -867,213 +868,327 @@ struct MainView: View {
     }
 
     var body: some View {
-        NavigationView {
-            VStack(spacing: 16) {
-                // 상단 바: 타이틀 + 우측 상단 히스토리 아이콘
-                HStack {
-                    Text("English Bell")
-                        .font(.largeTitle.bold())
-                        .foregroundColor(.primary)
+        ZStack {
+            // 배경 그라데이션
+            LinearGradient(
+                colors: [Color.purple.opacity(0.25), Color.indigo.opacity(0.25)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
 
-                    Spacer()
+            NavigationView {
+                ScrollView {
+                    VStack(spacing: 18) {
 
-                    NavigationLink {
-                        DailyHistoryView()
-                    } label: {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.title2)
-                            .foregroundColor(.purple)
-                            .padding(8)
-                            .background(Color.purple.opacity(0.15), in: Circle())
-                    }
-                }
-                .padding(.horizontal)
+                        // 상단 바 (타이틀 + 히스토리 아이콘)
+                        HStack {
+                            Text("English Bell")
+                                .font(.largeTitle.bold())
+                                .foregroundColor(.primary)
 
-                // ✅ [컨트롤 카드] 탭 + 저장 버튼 (시간 피커와 완전 분리)
-                HStack(spacing: 12) {
-                    Picker("알람 유형", selection: $selectedTab) {
-                        Text(AlarmType.daily.rawValue).tag(AlarmType.daily)
-                        Text(AlarmType.weekly.rawValue).tag(AlarmType.weekly)
-                        Text(AlarmType.interval.rawValue).tag(AlarmType.interval)
-                    }
-                    .pickerStyle(.segmented)
+                            Spacer()
 
-                    Button("저장") {
-                        let newAlarm: Alarm
-                        if selectedTab == .interval {
-                            newAlarm = Alarm(
-                                id: "",
-                                type: .interval,
-                                time: Date(),
-                                weekdays: [],
-                                interval: Int(selectedInterval),
-                                isActive: true
-                            )
-                        } else {
-                            newAlarm = Alarm(
-                                id: "",
-                                type: selectedTab,
-                                time: selectedTime,
-                                weekdays: selectedWeekdays,
-                                interval: nil,
-                                isActive: true
-                            )
-                        }
-                        historyManager.addAlarm(alarm: newAlarm)
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .padding()
-                .background(Color(.systemGray6))
-                .cornerRadius(15)
-                .padding(.horizontal)
-
-                // ✅ [설정 카드] 시간 피커 / 요일 토글 / 주기 슬라이더
-                VStack(alignment: .leading, spacing: 12) {
-                    if selectedTab == .daily || selectedTab == .weekly {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("시간 선택")
-                                .font(.headline)
-                            DatePicker("", selection: $selectedTime, displayedComponents: .hourAndMinute)
-                                .labelsHidden()
-                                .datePickerStyle(.wheel)
-                                .frame(height: 100)
-                        }
-                    }
-
-                    if selectedTab == .weekly {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("요일 선택")
-                                .font(.headline)
-                            HStack(spacing: 10) {
-                                ForEach(1..<8) { weekday in
-                                    Text(weekdays[weekday - 1])
-                                        .frame(width: 30, height: 30)
-                                        .background(
-                                            selectedWeekdays.contains(weekday)
-                                                ? Color.blue
-                                                : Color(.systemGray5)
-                                        )
-                                        .foregroundColor(
-                                            selectedWeekdays.contains(weekday) ? .white : .black
-                                        )
-                                        .cornerRadius(15)
-                                        .onTapGesture {
-                                            if selectedWeekdays.contains(weekday) {
-                                                selectedWeekdays.remove(weekday)
-                                            } else {
-                                                selectedWeekdays.insert(weekday)
-                                            }
-                                        }
-                                }
+                            NavigationLink {
+                                DailyHistoryView()
+                            } label: {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.title3.weight(.semibold))
+                                    .foregroundColor(.purple)
+                                    .padding(8)
+                                    .background(Color.white.opacity(0.55), in: Circle())
                             }
+                            .accessibilityLabel("히스토리")
                         }
-                    }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 6)
 
-                    if selectedTab == .interval {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("알람 주기 (\(Int(selectedInterval))분)")
-                                .font(.headline)
-                            Slider(value: $selectedInterval, in: 5...60, step: 5)
-                                .tint(.green)
-                        }
-                    }
-                }
-                .padding()
-                .background(Color(.systemGray6))
-                .cornerRadius(15)
-                .padding(.horizontal)
-
-                // 대화하기 버튼
-                Button("대화하기") {
-                    withAnimation { showChatView = true }
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.green)
-                .foregroundColor(.white)
-                .cornerRadius(15)
-                .padding(.horizontal)
-
-                // 오늘 진행 프로그레스바 (보라 그라데이션)
-                let todaySeconds = historyManager.seconds(for: now)
-                let progress = min(Double(todaySeconds) / 3600.0, 1.0)
-
-                VStack(spacing: 8) {
-                    HStack {
-                        Text("오늘 대화")
-                            .font(.headline)
-                        Spacer()
-                        Text("\(mmss(todaySeconds)) / 60:00")
-                            .font(.subheadline.monospacedDigit())
-                            .foregroundColor(.secondary)
-                    }
-                    GradientProgressBar(progress: progress)
-                        .frame(height: 16)
-                }
-                .padding(.horizontal)
-
-                // 알람/대화 기록 리스트
-                List {
-                    Section(header: Text("내 알람 목록 (최대 5개)").font(.headline)) {
-                        ForEach(historyManager.alarms) { alarm in
-                            HStack {
-                                Text(alarm.description)
-                                Spacer()
-                                Toggle(
-                                    "",
-                                    isOn: Binding(
-                                        get: { alarm.isActive },
-                                        set: { _ in historyManager.toggleAlarm(id: alarm.id) }
-                                    )
-                                )
-                                .labelsHidden()
-                                .tint(.green)
+                        // 카드 1: 탭 + 저장 (시간 피커와 완전 분리)
+                        SectionCard {
+                            HStack(spacing: 12) {
+                                Picker("알람 유형", selection: $selectedTab) {
+                                    Text(AlarmType.daily.rawValue).tag(AlarmType.daily)
+                                    Text(AlarmType.weekly.rawValue).tag(AlarmType.weekly)
+                                    Text(AlarmType.interval.rawValue).tag(AlarmType.interval)
+                                }
+                                .pickerStyle(.segmented)
 
                                 Button {
-                                    historyManager.deleteAlarm(id: alarm.id)
+                                    let newAlarm: Alarm
+                                    if selectedTab == .interval {
+                                        newAlarm = Alarm(id: "", type: .interval,
+                                                         time: Date(), weekdays: [],
+                                                         interval: Int(selectedInterval), isActive: true)
+                                    } else {
+                                        newAlarm = Alarm(id: "", type: selectedTab,
+                                                         time: selectedTime, weekdays: selectedWeekdays,
+                                                         interval: nil, isActive: true)
+                                    }
+                                    historyManager.addAlarm(alarm: newAlarm)
                                 } label: {
-                                    Image(systemName: "trash.fill")
-                                        .foregroundColor(.red)
+                                    Text("저장").font(.headline)
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
+                        }
+
+                        // 카드 2: 상세 설정 (선택된 탭에 따라 UI 전환)
+                        SectionCard(spacing: 14) {
+                            if selectedTab == .daily || selectedTab == .weekly {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("시간 선택")
+                                        .font(.headline)
+                                    DatePicker("", selection: $selectedTime, displayedComponents: .hourAndMinute)
+                                        .labelsHidden()
+                                        .datePickerStyle(.wheel)
+                                        .frame(height: 100)
+                                }
+                            }
+
+                            if selectedTab == .weekly {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("요일 선택")
+                                        .font(.headline)
+                                    FlowWeekdays(
+                                        labels: weekdays,
+                                        selected: $selectedWeekdays
+                                    )
+                                }
+                            }
+
+                            if selectedTab == .interval {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Text("알람 주기")
+                                            .font(.headline)
+                                        Spacer()
+                                        Text("\(Int(selectedInterval))분")
+                                            .font(.headline.monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Slider(value: $selectedInterval, in: 5...60, step: 5)
+                                        .tint(.purple)
                                 }
                             }
                         }
-                    }
 
-                    Section(header: Text("대화 기록 (최대 5개)").font(.headline)) {
-                        ForEach(historyManager.chatSessions) { session in
-                            NavigationLink(destination: DetailedChatView(session: session)) {
+                        // 대화하기 버튼 (그라데이션 프라이머리 버튼)
+                        Button {
+                            withAnimation { showChatView = true }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "waveform.circle.fill")
+                                    .font(.system(size: 22, weight: .semibold))
+                                Text("대화하기")
+                                    .font(.headline)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .foregroundColor(.white)
+                            .background(
+                                LinearGradient(colors: [Color.purple, Color.indigo],
+                                               startPoint: .leading, endPoint: .trailing)
+                            )
+                            .cornerRadius(14)
+                            .shadow(color: Color.indigo.opacity(0.25), radius: 12, x: 0, y: 8)
+                        }
+                        .padding(.horizontal, 16)
+
+                        // 오늘 진행 (보라 그라데이션 프로그레스바)
+                        let todaySeconds = historyManager.seconds(for: now)
+                        let progress = min(Double(todaySeconds) / 3600.0, 1.0)
+
+                        SectionCard {
+                            VStack(spacing: 10) {
                                 HStack {
-                                    Text(session.startTime, format: .dateTime.hour().minute().day().month())
+                                    Text("오늘 대화")
                                         .font(.headline)
                                     Spacer()
-                                    Text(mmss(session.totalSeconds ?? 0))
+                                    Text("\(mmss(todaySeconds)) / 60:00")
                                         .font(.subheadline.monospacedDigit())
-                                        .foregroundColor(.secondary)
+                                        .foregroundStyle(.secondary)
+                                }
+                                GradientProgressBar(progress: progress)
+                                    .frame(height: 16)
+                            }
+                        }
+
+                        // 알람/대화 기록 리스트 (글래스 카드처럼 보이도록)
+                        SectionCard {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("내 알람 목록 (최대 5개)")
+                                    .font(.headline)
+
+                                if historyManager.alarms.isEmpty {
+                                    Text("등록된 알람이 없습니다.")
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    ForEach(historyManager.alarms) { alarm in
+                                        HStack {
+                                            Text(alarm.description)
+                                                .font(.subheadline)
+                                            Spacer()
+                                            Toggle("", isOn: Binding(
+                                                get: { alarm.isActive },
+                                                set: { _ in historyManager.toggleAlarm(id: alarm.id) }
+                                            ))
+                                            .labelsHidden()
+                                            .tint(.purple)
+
+                                            Button {
+                                                historyManager.deleteAlarm(id: alarm.id)
+                                            } label: {
+                                                Image(systemName: "trash.fill")
+                                                    .foregroundColor(.red)
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                        .padding(.vertical, 6)
+
+                                        Divider().opacity(0.15)
+                                    }
                                 }
                             }
                         }
-                        .onDelete { indexSet in
-                            indexSet.forEach { index in
-                                let sessionId = historyManager.chatSessions[index].id
-                                historyManager.deleteChatSession(id: sessionId)
+
+                        SectionCard {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("대화 기록 (최대 5개)")
+                                    .font(.headline)
+
+                                if historyManager.chatSessions.isEmpty {
+                                    Text("대화 기록이 없습니다.")
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    ForEach(historyManager.chatSessions) { session in
+                                        NavigationLink(destination: DetailedChatView(session: session)) {
+                                            HStack {
+                                                Text(session.startTime, format: .dateTime.hour().minute().day().month())
+                                                    .font(.subheadline)
+                                                Spacer()
+                                                Text(mmss(session.totalSeconds ?? 0))
+                                                    .font(.subheadline.monospacedDigit())
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            .contentShape(Rectangle())
+                                        }
+                                        .padding(.vertical, 6)
+
+                                        Divider().opacity(0.15)
+                                    }
+                                }
                             }
                         }
+
+                        Spacer(minLength: 10)
                     }
+                    .padding(.bottom, 16)
                 }
-                .listStyle(.insetGrouped)
-                .frame(maxHeight: .infinity)
+                .scrollIndicators(.hidden)
+                .onAppear {
+                    historyManager.loadChatSessions()
+                    now = Date()
+                }
+                .onReceive(minuteTicker) { _ in
+                    now = Date()
+                }
+                .background(Color.clear)
+                .navigationBarHidden(true)
             }
-            .padding(.top)
         }
-        .navigationViewStyle(.stack)
-        .onAppear {
-            historyManager.loadChatSessions()
-            now = Date()
+    }
+}
+
+//
+// MARK: - Reusable UI
+//
+
+/// 글래스 카드
+fileprivate struct SectionCard<Content: View>: View {
+    var spacing: CGFloat = 12
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            content()
         }
-        .onReceive(minuteTicker) { _ in
-            now = Date()
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(.thinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18)
+                        .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                )
+        )
+        .shadow(color: Color.black.opacity(0.07), radius: 12, x: 0, y: 6)
+        .padding(.horizontal, 16)
+    }
+}
+
+// ✅ 교체: FlowWeekdays (LazyVGrid 사용, 자동 줄바꿈 + 올바른 높이 계산)
+// ✅ 교체: FlowWeekdays (항상 1줄, 가로 스크롤)
+fileprivate struct FlowWeekdays: View {
+    let labels: [String]            // ["일","월","화","수","목","금","토"]
+    @Binding var selected: Set<Int> // 1~7
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(1..<8) { weekday in
+                    let isOn = selected.contains(weekday)
+                    Text(labels[weekday - 1])
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(isOn ? Color.purple : Color.white.opacity(0.6))
+                        .foregroundColor(isOn ? .white : .primary)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.purple.opacity(0.5), lineWidth: isOn ? 0 : 1)
+                        )
+                        .cornerRadius(12)
+                        .onTapGesture {
+                            if isOn { selected.remove(weekday) } else { selected.insert(weekday) }
+                        }
+                }
+            }
+            .padding(.vertical, 2) // 스크롤 영역에 약간 여유
         }
+        .frame(maxWidth: .infinity) // 부모 폭 채우기
+    }
+}
+
+
+
+/// 가변 줄바꿈 HStack (태그 레이아웃)
+fileprivate struct FlexibleWrapHStack<Content: View>: View {
+    var spacing: CGFloat = 8
+    var runSpacing: CGFloat = 8
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        var width = CGFloat.zero
+        var height = CGFloat.zero
+        return GeometryReader { g in
+            ZStack(alignment: .topLeading) {
+                content()
+                    .alignmentGuide(.leading) { d in
+                        if (abs(width - d.width) > g.size.width) {
+                            width = 0
+                            height -= (d.height + runSpacing)
+                        }
+                        let result = width
+                        width -= (d.width + spacing)
+                        return result
+                    }
+                    .alignmentGuide(.top) { _ in
+                        let result = height
+                        return result
+                    }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(minHeight: 0)
     }
 }
 
