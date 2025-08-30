@@ -494,9 +494,13 @@ class ChatHistoryManager: ObservableObject {
         self.alarms = []
     }
     
-    func addAlarm(alarm: Alarm) {
-        guard alarms.count < 5 else { return }
-        
+    // ✅ 교체: ChatHistoryManager.addAlarm(alarm:) → Bool 반환
+    func addAlarm(alarm: Alarm) -> Bool {
+        // 최대 5개 제한
+        guard alarms.count < 5 else {
+            return false
+        }
+
         var newAlarm = alarm
         if newAlarm.id.isEmpty {
             newAlarm.id = UUID().uuidString
@@ -504,7 +508,9 @@ class ChatHistoryManager: ObservableObject {
         alarms.append(newAlarm)
         scheduleNotification(for: newAlarm)
         saveAlarms()
+        return true
     }
+
     
     func toggleAlarm(id: String) {
         if let index = alarms.firstIndex(where: { $0.id == id }) {
@@ -846,6 +852,7 @@ struct DetailedChatView: View {
 
 
 // ✅ 세련된 메인 화면 (전체 교체)
+// ✅ 세련 디자인 + 알람 5개 제한 팝업 포함 MainView (전체 교체)
 struct MainView: View {
     @State private var selectedTab: AlarmType = .daily
     @State private var selectedTime = Date()
@@ -861,6 +868,9 @@ struct MainView: View {
     // 자정 리셋용
     @State private var now = Date()
     private let minuteTicker = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+
+    // 알람 5개 초과 팝업
+    @State private var showAlarmLimitAlert = false
 
     private func mmss(_ sec: Int) -> String {
         let m = sec / 60, s = sec % 60
@@ -923,7 +933,8 @@ struct MainView: View {
                                                          time: selectedTime, weekdays: selectedWeekdays,
                                                          interval: nil, isActive: true)
                                     }
-                                    historyManager.addAlarm(alarm: newAlarm)
+                                    let ok = historyManager.addAlarm(alarm: newAlarm) // ← Bool 반환 버전 사용
+                                    if !ok { showAlarmLimitAlert = true }
                                 } label: {
                                     Text("저장").font(.headline)
                                 }
@@ -948,10 +959,7 @@ struct MainView: View {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("요일 선택")
                                         .font(.headline)
-                                    FlowWeekdays(
-                                        labels: weekdays,
-                                        selected: $selectedWeekdays
-                                    )
+                                    FlowWeekdays(labels: weekdays, selected: $selectedWeekdays)
                                 }
                             }
 
@@ -1012,7 +1020,7 @@ struct MainView: View {
                             }
                         }
 
-                        // 알람/대화 기록 리스트 (글래스 카드처럼 보이도록)
+                        // 알람/대화 기록 리스트 (글래스 카드)
                         SectionCard {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("내 알람 목록 (최대 5개)")
@@ -1095,11 +1103,16 @@ struct MainView: View {
                 .navigationBarHidden(true)
             }
         }
+        .alert("저장할 수 없어요", isPresented: $showAlarmLimitAlert) {
+            Button("확인", role: .cancel) { }
+        } message: {
+            Text("알람은 최대 5개까지 저장할 수 있어요.")
+        }
     }
 }
 
 //
-// MARK: - Reusable UI
+// MARK: - Reusable UI (같은 파일에 붙여넣어 사용)
 //
 
 /// 글래스 카드
@@ -1125,8 +1138,7 @@ fileprivate struct SectionCard<Content: View>: View {
     }
 }
 
-// ✅ 교체: FlowWeekdays (LazyVGrid 사용, 자동 줄바꿈 + 올바른 높이 계산)
-// ✅ 교체: FlowWeekdays (항상 1줄, 가로 스크롤)
+/// 요일 선택: 항상 1줄, 가로 스크롤
 fileprivate struct FlowWeekdays: View {
     let labels: [String]            // ["일","월","화","수","목","금","토"]
     @Binding var selected: Set<Int> // 1~7
@@ -1152,11 +1164,72 @@ fileprivate struct FlowWeekdays: View {
                         }
                 }
             }
-            .padding(.vertical, 2) // 스크롤 영역에 약간 여유
+            .padding(.vertical, 2)
         }
-        .frame(maxWidth: .infinity) // 부모 폭 채우기
+        .frame(maxWidth: .infinity)
     }
 }
+
+
+//
+// MARK: - Reusable UI
+//
+
+///// 글래스 카드
+//fileprivate struct SectionCard<Content: View>: View {
+//    var spacing: CGFloat = 12
+//    @ViewBuilder var content: () -> Content
+//
+//    var body: some View {
+//        VStack(alignment: .leading, spacing: spacing) {
+//            content()
+//        }
+//        .padding(16)
+//        .background(
+//            RoundedRectangle(cornerRadius: 18)
+//                .fill(.thinMaterial)
+//                .overlay(
+//                    RoundedRectangle(cornerRadius: 18)
+//                        .stroke(Color.white.opacity(0.35), lineWidth: 1)
+//                )
+//        )
+//        .shadow(color: Color.black.opacity(0.07), radius: 12, x: 0, y: 6)
+//        .padding(.horizontal, 16)
+//    }
+//}
+//
+//// ✅ 교체: FlowWeekdays (LazyVGrid 사용, 자동 줄바꿈 + 올바른 높이 계산)
+//// ✅ 교체: FlowWeekdays (항상 1줄, 가로 스크롤)
+//fileprivate struct FlowWeekdays: View {
+//    let labels: [String]            // ["일","월","화","수","목","금","토"]
+//    @Binding var selected: Set<Int> // 1~7
+//
+//    var body: some View {
+//        ScrollView(.horizontal, showsIndicators: false) {
+//            HStack(spacing: 8) {
+//                ForEach(1..<8) { weekday in
+//                    let isOn = selected.contains(weekday)
+//                    Text(labels[weekday - 1])
+//                        .font(.subheadline.weight(.semibold))
+//                        .padding(.horizontal, 12)
+//                        .padding(.vertical, 8)
+//                        .background(isOn ? Color.purple : Color.white.opacity(0.6))
+//                        .foregroundColor(isOn ? .white : .primary)
+//                        .overlay(
+//                            RoundedRectangle(cornerRadius: 12)
+//                                .stroke(Color.purple.opacity(0.5), lineWidth: isOn ? 0 : 1)
+//                        )
+//                        .cornerRadius(12)
+//                        .onTapGesture {
+//                            if isOn { selected.remove(weekday) } else { selected.insert(weekday) }
+//                        }
+//                }
+//            }
+//            .padding(.vertical, 2) // 스크롤 영역에 약간 여유
+//        }
+//        .frame(maxWidth: .infinity) // 부모 폭 채우기
+//    }
+//}
 
 
 
