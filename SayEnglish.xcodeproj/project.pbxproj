@@ -6,8 +6,15 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		836B73F68468E13430529FC6 /* Pods_SayEnglish.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 30F16B7BD4D111FC74C9CAF4 /* Pods_SayEnglish.framework */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		0A5A78C62E5F472A004D148E /* SayEnglish.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SayEnglish.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		30F16B7BD4D111FC74C9CAF4 /* Pods_SayEnglish.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_SayEnglish.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		CC55DD8B4C0021760AC9F50A /* Pods-SayEnglish.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SayEnglish.release.xcconfig"; path = "Target Support Files/Pods-SayEnglish/Pods-SayEnglish.release.xcconfig"; sourceTree = "<group>"; };
+		FF05F11A0E188E463641D45D /* Pods-SayEnglish.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SayEnglish.debug.xcconfig"; path = "Target Support Files/Pods-SayEnglish/Pods-SayEnglish.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -36,6 +43,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				836B73F68468E13430529FC6 /* Pods_SayEnglish.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -47,6 +55,8 @@
 			children = (
 				0A5A78C82E5F472A004D148E /* SayEnglish */,
 				0A5A78C72E5F472A004D148E /* Products */,
+				7A55F189E9FF7BCD73088755 /* Pods */,
+				7DB92D47C67477654E6D9137 /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -58,6 +68,23 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		7A55F189E9FF7BCD73088755 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				FF05F11A0E188E463641D45D /* Pods-SayEnglish.debug.xcconfig */,
+				CC55DD8B4C0021760AC9F50A /* Pods-SayEnglish.release.xcconfig */,
+			);
+			path = Pods;
+			sourceTree = "<group>";
+		};
+		7DB92D47C67477654E6D9137 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				30F16B7BD4D111FC74C9CAF4 /* Pods_SayEnglish.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -65,9 +92,11 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 0A5A78D12E5F472C004D148E /* Build configuration list for PBXNativeTarget "SayEnglish" */;
 			buildPhases = (
+				71869C1C8D649E71F17216DD /* [CP] Check Pods Manifest.lock */,
 				0A5A78C22E5F472A004D148E /* Sources */,
 				0A5A78C32E5F472A004D148E /* Frameworks */,
 				0A5A78C42E5F472A004D148E /* Resources */,
+				8D997DFF05609121B73C5DA3 /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -77,8 +106,6 @@
 				0A5A78C82E5F472A004D148E /* SayEnglish */,
 			);
 			name = SayEnglish;
-			packageProductDependencies = (
-			);
 			productName = SayEnglish;
 			productReference = 0A5A78C62E5F472A004D148E /* SayEnglish.app */;
 			productType = "com.apple.product-type.application";
@@ -126,6 +153,52 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		71869C1C8D649E71F17216DD /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-SayEnglish-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		8D997DFF05609121B73C5DA3 /* [CP] Copy Pods Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-SayEnglish/Pods-SayEnglish-resources-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			inputPaths = (
+			);
+			name = "[CP] Copy Pods Resources";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-SayEnglish/Pods-SayEnglish-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-SayEnglish/Pods-SayEnglish-resources.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		0A5A78C22E5F472A004D148E /* Sources */ = {
@@ -176,7 +249,7 @@
 				DEVELOPMENT_TEAM = 9KDUS59PR5;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -240,7 +313,7 @@
 				DEVELOPMENT_TEAM = 9KDUS59PR5;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -261,11 +334,12 @@
 		};
 		0A5A78D22E5F472C004D148E /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = FF05F11A0E188E463641D45D /* Pods-SayEnglish.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = 9KDUS59PR5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -283,7 +357,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5;
+				MARKETING_VERSION = 2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jjpapa.speaktimekiki;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -294,11 +368,12 @@
 		};
 		0A5A78D32E5F472C004D148E /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CC55DD8B4C0021760AC9F50A /* Pods-SayEnglish.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 11;
 				DEVELOPMENT_TEAM = 9KDUS59PR5;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -316,7 +391,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5;
+				MARKETING_VERSION = 2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jjpapa.speaktimekiki;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

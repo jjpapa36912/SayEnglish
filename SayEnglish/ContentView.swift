@@ -9,6 +9,44 @@ import SwiftUI
 import AVFoundation
 import Speech
 import UserNotifications
+import GoogleMobileAds
+
+enum ChatLevel: String, Codable, CaseIterable {
+    case beginner, intermediate, advanced
+    
+    var emoji: String {
+        switch self {
+        case .beginner: return "🟢"
+        case .intermediate: return "🟡"
+        case .advanced: return "🔴"
+        }
+    }
+    var title: String {
+        switch self {
+        case .beginner: return "Beginner"
+        case .intermediate: return "Intermediate"
+        case .advanced: return "Advanced"
+        }
+    }
+    var subtitle: String {
+        switch self {
+        case .beginner: return "기초적인 일상 표현부터 차근차근"
+        case .intermediate: return "실제 대화에 가까운 문장 훈련"
+        case .advanced: return "상황별 심화 대화로 실전 감각 키우기"
+        }
+    }
+    /// /chat/start에 보낼 프롬프트
+    var seedPrompt: String {
+        switch self {
+        case .beginner:
+            return "Let's practice basic daily English expressions step-by-step. Keep responses short, slow, and simple."
+        case .intermediate:
+            return "Let's practice real-life English dialogue. Give natural, moderately long replies and follow-up questions."
+        case .advanced:
+            return "Let's practice advanced scenario-based conversation. Give nuanced, challenging prompts and push fluency."
+        }
+    }
+}
 
 // MARK: - 1. Data Models (서버와 통신할 데이터 구조)
 // FastAPI 서버의 Pydantic 모델과 동일한 구조로 Codable을 채택합니다.
@@ -180,39 +218,45 @@ class AudioController: NSObject, ObservableObject, SFSpeechRecognizerDelegate, A
     
     func startRecognition() throws {
         guard let viewModel = viewModel, viewModel.isChatActive else { return }
+        guard !synthesizer.isSpeaking else { return } // TTS 중이면 무시
 
-        if let recognitionTask = recognitionTask {
-            recognitionTask.cancel()
-            self.recognitionTask = nil
-        }
-        
-        let audioSession = AVAudioSession.sharedInstance()
-        try audioSession.setCategory(.playAndRecord, mode: .measurement, options: .duckOthers)
-        try audioSession.overrideOutputAudioPort(.speaker)
-        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-        
+        recognitionTask?.cancel()
+        recognitionTask = nil
+
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playAndRecord,
+                                mode: .voiceChat, // ✅ 에코 캔슬링
+                                options: [.defaultToSpeaker, .allowBluetooth])
+        try session.setPreferredSampleRate(44100)                // ✅ STT와 잘 맞음
+        try session.setPreferredIOBufferDuration(0.005)          // ✅ 지연 축소
+        try session.setActive(true, options: .notifyOthersOnDeactivation)
+
         let inputNode = audioEngine.inputNode
-        
         inputNode.removeTap(onBus: 0)
-        
-        recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
-        guard let recognitionRequest = recognitionRequest else { fatalError("Unable to create a SFSpeechAudioBufferRecognitionRequest object") }
-        recognitionRequest.shouldReportPartialResults = true
 
-        recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest, delegate: self)
-        
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { (buffer: AVAudioPCMBuffer, when: AVAudioTime) in
-            self.recognitionRequest?.append(buffer)
+        let req = SFSpeechAudioBufferRecognitionRequest()
+        req.shouldReportPartialResults = true
+        // 필요 시: on-device만 쓰고 싶다면
+        // req.requiresOnDeviceRecognition = true
+
+        recognitionRequest = req
+        recognitionTask = speechRecognizer.recognitionTask(with: req, delegate: self)
+
+        let format = inputNode.outputFormat(forBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buf, _ in
+            self.recognitionRequest?.append(buf)
         }
-        
+
         audioEngine.prepare()
         try audioEngine.start()
-        
+
         isRecognizing = true
-        
         resetSilenceTimer()
+
+        // ✅ 재시작 워밍업 기간 설정 (아래 3)에서 사용할 플래그)
+        warmupUntil = Date().addingTimeInterval(0.35)
     }
+
     
     func forceStopRecognition() {
         audioEngine.stop()
@@ -239,6 +283,7 @@ class AudioController: NSObject, ObservableObject, SFSpeechRecognizerDelegate, A
         return AVSpeechSynthesisVoice(language: "en-US")
     }
     
+    
     func speak(_ text: String) {
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
@@ -251,7 +296,16 @@ class AudioController: NSObject, ObservableObject, SFSpeechRecognizerDelegate, A
         utterance.volume = 1.0
         synthesizer.speak(utterance)
     }
-    
+    private var warmupUntil: Date? = nil
+
+    func speechRecognitionTask(_ task: SFSpeechRecognitionTask,
+                               didHypothesizeTranscription t: SFTranscription) {
+        // ✅ 재시작 워밍업 시간 동안은 파셜 무시
+        if let until = warmupUntil, Date() < until { return }
+        self.recognizedText = t.formattedString
+        resetSilenceTimer()
+    }
+
     // MARK: - SFSpeechRecognitionTaskDelegate
     func speechRecognitionTask(_ task: SFSpeechRecognitionTask, didChange state: SFSpeechRecognitionTaskState) {
     }
@@ -263,23 +317,25 @@ class AudioController: NSObject, ObservableObject, SFSpeechRecognizerDelegate, A
     func speechRecognitionTask(_ task: SFSpeechRecognitionTask, didFinishSpeech: SFSpeechRecognitionResult) {
     }
     
-    func speechRecognitionTask(_ task: SFSpeechRecognitionTask, didHypothesizeTranscription transcription: SFTranscription) {
-        self.recognizedText = transcription.formattedString
-        resetSilenceTimer()
-    }
+    
     
     func speechRecognitionTask(_ task: SFSpeechRecognitionTask, didFinishSuccessfully successfully: Bool) {
     }
+    func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish u: AVSpeechUtterance) {
+        self.isSpeaking = false
+        // ✅ 0.3~0.4초 뒤에 STT 재개
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            try? self.startRecognition()
+        }
+    }
+
     
     // MARK: - AVSpeechSynthesizerDelegate
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
         self.isSpeaking = true
     }
     
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        self.isSpeaking = false
-        try? startRecognition()
-    }
+    
     
     private func resetSilenceTimer() {
         silenceTimer?.invalidate()
@@ -305,7 +361,8 @@ class ChatViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String? = nil
     @Published var isChatActive: Bool = true
-    
+    @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
+
     // ✅ 추가: 현재 진행 중인 채팅 세션
     @Published var currentSession: ChatSession?
 
@@ -416,179 +473,7 @@ class ChatViewModel: ObservableObject {
             try? self.audioController.startRecognition()
         }
 }
-//
-//// MARK: - 4. Alarm & History Manager
-//// ✅ AlarmManager와 ChatHistoryManager를 하나로 합쳐서 관리 효율을 높입니다.
-//class ChatHistoryManager: ObservableObject {
-//    
-//    private let chatSessionsKey = "savedChatSessions"
-//    private let maxSessions = 5
-//
-//    @Published var alarms: [Alarm] = []
-//    private let alarmsKey = "savedAlarms"
-//    
-//    @Published var chatSessions: [ChatSession] = []
-//    
-//    init() {
-//        loadAlarms()
-//        loadChatSessions()
-//    }
-//    
-//    // MARK: - Chat History Management
-//    
-//    // UserDefaults에서 채팅 기록 불러오기
-//    func loadChatSessions() {
-//        if let savedSessions = UserDefaults.standard.data(forKey: chatSessionsKey) {
-//            if let decodedSessions = try? JSONDecoder().decode([ChatSession].self, from: savedSessions) {
-//                self.chatSessions = decodedSessions.sorted(by: { $0.startTime > $1.startTime })
-//                return
-//            }
-//        }
-//        self.chatSessions = []
-//    }
-//    
-//    // 새로운 채팅 세션 저장 (5개 제한)
-//    func saveChatSession(_ session: ChatSession) {
-//        // 이미 존재하는 세션이 아닌지 확인
-//        if let index = chatSessions.firstIndex(where: { $0.id == session.id }) {
-//            chatSessions[index] = session
-//        } else {
-//            // 새로운 세션 추가
-//            chatSessions.insert(session, at: 0)
-//        }
-//        
-//        // 5개 초과 시 가장 오래된 것 삭제
-//        if chatSessions.count > maxSessions {
-//            chatSessions.removeLast()
-//        }
-//        
-//        saveChatSessions()
-//    }
-//    
-//    // UserDefaults에 채팅 기록 저장
-//    func saveChatSessions() {
-//        if let encoded = try? JSONEncoder().encode(chatSessions) {
-//            UserDefaults.standard.set(encoded, forKey: chatSessionsKey)
-//        }
-//    }
-//    
-//    // 특정 채팅 세션 삭제
-//    func deleteChatSession(id: UUID) {
-//        chatSessions.removeAll(where: { $0.id == id })
-//        saveChatSessions()
-//    }
-//    
-//    // MARK: - Alarm Management
-//    
-//    private func saveAlarms() {
-//        if let encoded = try? JSONEncoder().encode(alarms) {
-//            UserDefaults.standard.set(encoded, forKey: alarmsKey)
-//        }
-//    }
-//    
-//    private func loadAlarms() {
-//        if let savedAlarms = UserDefaults.standard.data(forKey: alarmsKey) {
-//            if let decodedAlarms = try? JSONDecoder().decode([Alarm].self, from: savedAlarms) {
-//                self.alarms = decodedAlarms
-//                return
-//            }
-//        }
-//        self.alarms = []
-//    }
-//    
-//    // ✅ 교체: ChatHistoryManager.addAlarm(alarm:) → Bool 반환
-//    func addAlarm(alarm: Alarm) -> Bool {
-//        // 최대 5개 제한
-//        guard alarms.count < 5 else {
-//            return false
-//        }
-//
-//        var newAlarm = alarm
-//        if newAlarm.id.isEmpty {
-//            newAlarm.id = UUID().uuidString
-//        }
-//        alarms.append(newAlarm)
-//        scheduleNotification(for: newAlarm)
-//        saveAlarms()
-//        return true
-//    }
-//
-//    
-//    func toggleAlarm(id: String) {
-//        if let index = alarms.firstIndex(where: { $0.id == id }) {
-//            alarms[index].isActive.toggle()
-//            if alarms[index].isActive {
-//                scheduleNotification(for: alarms[index])
-//            } else {
-//                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [alarms[index].id])
-//            }
-//            saveAlarms()
-//        }
-//    }
-//    
-//    func deleteAlarm(id: String) {
-//        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [id])
-//        alarms.removeAll(where: { $0.id == id })
-//        saveAlarms()
-//    }
-//    
-//    private func identifiers(for alarm: Alarm) -> [String] {
-//        switch alarm.type {
-//        case .weekly:
-//            return alarm.weekdays.map { "\(alarm.id)_w\($0)" }
-//        default:
-//            return [alarm.id]
-//        }
-//    }
-//    
-//    private func scheduleNotification(for alarm: Alarm) {
-//        UNUserNotificationCenter.current()
-//            .removePendingNotificationRequests(withIdentifiers: identifiers(for: alarm))
-//        
-//        guard alarm.isActive else { return }
-//        
-//        let center = UNUserNotificationCenter.current()
-//        
-//        switch alarm.type {
-//        case .weekly:
-//            let content = UNMutableNotificationContent()
-//            content.title = "영어 대화 알람"
-//            content.body = "영어 대화할 시간입니다!"
-//            
-//            let alarmSounds = ["eng_prompt_01.wav","eng_prompt_02.wav","eng_prompt_03.wav","eng_prompt_04.wav","eng_prompt_05.wav"]
-//            if let s = alarmSounds.randomElement() {
-//                content.sound = UNNotificationSound(named: UNNotificationSoundName(s))
-//            } else {
-//                content.sound = .default
-//            }
-//            
-//            let hm = Calendar.current.dateComponents([.hour, .minute], from: alarm.time)
-//            
-//            for wd in alarm.weekdays {
-//                var dc = hm
-//                dc.weekday = wd
-//                let trigger = UNCalendarNotificationTrigger(dateMatching: dc, repeats: true)
-//                let id = "\(alarm.id)_w\(wd)"
-//                let req = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
-//                center.add(req) { err in
-//                    if let err = err { print("주간 알람 스케줄 실패(\(wd)): \(err)") }
-//                }
-//            }
-//            
-//        case .daily, .interval:
-//            let request = alarm.createNotificationRequest()
-//            if request.trigger != nil {
-//                center.add(request) { error in
-//                    if let error = error {
-//                        print("알림 스케줄링 실패: \(error.localizedDescription)")
-//                    } else {
-//                        print("알람 스케줄링 성공: \(alarm.id)")
-//                    }
-//                }
-//            }
-//        }
-//    }
-//}
+
 
 
 // MARK: - 5. Views (UI 컴포넌트)
@@ -597,6 +482,10 @@ struct ChatView: View {
     @StateObject private var viewModel = ChatViewModel()
     @Binding var showChatView: Bool
     @EnvironmentObject var historyManager: ChatHistoryManager
+    @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
+    let level: ChatLevel                      // ⬅️ 추가
+
+
 
     // 타이머 상태
     @State private var elapsedSec = 0
@@ -643,6 +532,12 @@ struct ChatView: View {
             .padding(.top)
             .padding(.bottom, 5)
 
+            
+            
+            // ⬇️ 배너
+            BannerAdView(controller: bannerCtrl)
+                .frame(height: 50)
+                .padding(.bottom, 6)
             // 메시지 리스트
             ScrollView {
                 VStack(alignment: .leading, spacing: 15) {
@@ -783,7 +678,8 @@ struct AudioControlView: View {
 struct DetailedChatView: View {
     let session: ChatSession
     @Environment(\.dismiss) var dismiss
-    
+    @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
+
     // 로컬 TTS 전용 합성기 (ChatViewModel에 의존 X)
     @State private var synthesizer = AVSpeechSynthesizer()
     
@@ -831,7 +727,10 @@ struct DetailedChatView: View {
             }
             .padding(.top)
             .padding(.bottom, 5)
-
+            // ⬇️ 배너
+                        BannerAdView(controller: bannerCtrl)
+                            .frame(height: 50)
+                            .padding(.bottom, 6)
             ScrollView {
                 VStack(alignment: .leading, spacing: 15) {
                     ForEach(session.messages) { message in
@@ -868,6 +767,8 @@ struct MainView: View {
     @State private var selectedTime = Date()
     @State private var selectedWeekdays: Set<Int> = []
     @State private var selectedInterval: Double = 30
+    @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
+
 
     @EnvironmentObject var historyManager: ChatHistoryManager
     @Binding var showChatView: Bool
@@ -896,6 +797,10 @@ struct MainView: View {
                 ScrollView {
                     VStack(spacing: 18) {
 
+                        BannerAdView(controller: bannerCtrl)
+                                                    .frame(height: 50) // 표준 320x50
+                                                    .padding(.top, 6)
+                        
                         // 상단 바: 타이틀 + [히스토리] [세션] 아이콘
                         HStack(spacing: 10) {
                             Text("English Bell")
@@ -905,21 +810,21 @@ struct MainView: View {
                             Spacer()
 
                             // 히스토리(일자별 누적)
-                            NavigationLink {
-                                DailyHistoryView()
-                            } label: {
-                                Image(systemName: "clock.arrow.circlepath")
-                                    .font(.title3.weight(.semibold))
-                                    .foregroundColor(.purple)
-                                    .padding(8)
-                                    .background(Color.white.opacity(0.55), in: Circle())
-                            }
-                            .accessibilityLabel("히스토리")
+//                            NavigationLink {
+//                                DailyHistoryView()
+//                            } label: {
+//                                Image(systemName: "clock.arrow.circlepath")
+//                                    .font(.title3.weight(.semibold))
+//                                    .foregroundColor(.purple)
+//                                    .padding(8)
+//                                    .background(Color.white.opacity(0.55), in: Circle())
+//                            }
+//                            .accessibilityLabel("히스토리")
                             // ✅ 새로: 날짜 목록 페이지로 이동
                                 NavigationLink {
                                     DatesListView()
                                 } label: {
-                                    Image(systemName: "calendar")
+                                    Image(systemName: "clock.arrow.circlepath")
                                         .font(.title3.weight(.semibold))
                                         .foregroundColor(.purple)
                                         .padding(8)
@@ -1104,6 +1009,8 @@ struct MainView: View {
                 .background(Color.clear)
                 .navigationBarHidden(true)
             }
+            .navigationViewStyle(.stack)   // ✅ iPad에서도 단일 화면(스택)로 표시
+
         }
         .alert("저장할 수 없어요😂", isPresented: $showAlarmLimitAlert) {
             Button("확인", role: .cancel) { }
@@ -1244,73 +1151,6 @@ struct SessionsListView: View {
         .navigationBarBackButtonHidden(true)
     }
 }
-
-
-//
-// MARK: - Reusable UI (같은 파일에 붙여넣어 사용)
-//
-
-
-
-//
-// MARK: - Reusable UI
-//
-
-///// 글래스 카드
-//fileprivate struct SectionCard<Content: View>: View {
-//    var spacing: CGFloat = 12
-//    @ViewBuilder var content: () -> Content
-//
-//    var body: some View {
-//        VStack(alignment: .leading, spacing: spacing) {
-//            content()
-//        }
-//        .padding(16)
-//        .background(
-//            RoundedRectangle(cornerRadius: 18)
-//                .fill(.thinMaterial)
-//                .overlay(
-//                    RoundedRectangle(cornerRadius: 18)
-//                        .stroke(Color.white.opacity(0.35), lineWidth: 1)
-//                )
-//        )
-//        .shadow(color: Color.black.opacity(0.07), radius: 12, x: 0, y: 6)
-//        .padding(.horizontal, 16)
-//    }
-//}
-//
-//// ✅ 교체: FlowWeekdays (LazyVGrid 사용, 자동 줄바꿈 + 올바른 높이 계산)
-//// ✅ 교체: FlowWeekdays (항상 1줄, 가로 스크롤)
-//fileprivate struct FlowWeekdays: View {
-//    let labels: [String]            // ["일","월","화","수","목","금","토"]
-//    @Binding var selected: Set<Int> // 1~7
-//
-//    var body: some View {
-//        ScrollView(.horizontal, showsIndicators: false) {
-//            HStack(spacing: 8) {
-//                ForEach(1..<8) { weekday in
-//                    let isOn = selected.contains(weekday)
-//                    Text(labels[weekday - 1])
-//                        .font(.subheadline.weight(.semibold))
-//                        .padding(.horizontal, 12)
-//                        .padding(.vertical, 8)
-//                        .background(isOn ? Color.purple : Color.white.opacity(0.6))
-//                        .foregroundColor(isOn ? .white : .primary)
-//                        .overlay(
-//                            RoundedRectangle(cornerRadius: 12)
-//                                .stroke(Color.purple.opacity(0.5), lineWidth: isOn ? 0 : 1)
-//                        )
-//                        .cornerRadius(12)
-//                        .onTapGesture {
-//                            if isOn { selected.remove(weekday) } else { selected.insert(weekday) }
-//                        }
-//                }
-//            }
-//            .padding(.vertical, 2) // 스크롤 영역에 약간 여유
-//        }
-//        .frame(maxWidth: .infinity) // 부모 폭 채우기
-//    }
-//}
 
 
 
@@ -1570,6 +1410,8 @@ struct DatesListView: View {
     @EnvironmentObject var historyManager: ChatHistoryManager
     @Environment(\.dismiss) var dismiss
 
+    @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
+
     private func mmss(_ sec: Int) -> String {
         let m = sec / 60, s = sec % 60
         return String(format: "%02d:%02d", m, s)
@@ -1602,6 +1444,10 @@ struct DatesListView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 8)
 
+                // ⬇️ 배너 (상단 바 바로 아래)
+                                BannerAdView(controller: bannerCtrl)
+                                    .frame(height: 50)
+                                    .padding(.bottom, 8)
                 // 날짜 리스트
                 ScrollView {
                     VStack(spacing: 14) {
@@ -1664,6 +1510,7 @@ struct SessionsByDateView: View {
     let date: Date
     @EnvironmentObject var historyManager: ChatHistoryManager
     @Environment(\.dismiss) var dismiss
+    @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
 
     private func mmss(_ sec: Int) -> String {
         let m = sec / 60, s = sec % 60
@@ -1696,7 +1543,10 @@ struct SessionsByDateView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
-
+                // ⬇️ 배너
+                                BannerAdView(controller: bannerCtrl)
+                                    .frame(height: 50)
+                                    .padding(.bottom, 8)
                 // 세션 리스트
                 List {
                     ForEach(historyManager.sessions(on: date)) { session in
@@ -1886,6 +1736,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         requestNotificationPermission()
+//        GADMobileAds.sharedInstance().start(completionHandler: nil)
+
         return true
     }
 
