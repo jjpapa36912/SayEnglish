@@ -37,15 +37,12 @@ enum ChatLevel: String, Codable, CaseIterable {
     }
     /// /chat/start에 보낼 프롬프트
     var seedPrompt: String {
-        switch self {
-        case .beginner:
-            return "Let's practice basic daily English expressions step-by-step. Keep responses short, slow, and simple."
-        case .intermediate:
-            return "Let's practice real-life English dialogue. Give natural, moderately long replies and follow-up questions."
-        case .advanced:
-            return "Let's practice advanced scenario-based conversation. Give nuanced, challenging prompts and push fluency."
+            switch self {
+            case .beginner: return "Let's practice basic daily English expressions step-by-step. Keep responses short, slow, and simple."
+            case .intermediate: return "Let's practice real-life English dialogue. Give natural, moderately long replies and follow-up questions."
+            case .advanced: return "Let's practice advanced scenario-based conversation. Give nuanced, challenging prompts and push fluency."
+            }
         }
-    }
 }
 
 // MARK: - 1. Data Models (서버와 통신할 데이터 구조)
@@ -60,11 +57,25 @@ struct ChatMessage: Identifiable, Codable, Equatable {
 struct StartResponse: Codable {
     let assistant_text: String
 }
-
+// ✅ 요청 DTO에 level 추가
+struct StartRequest: Codable {
+    let prompt: String?
+    let level: String
+    init(prompt: String?, level: ChatLevel) {
+        self.prompt = prompt
+        self.level = level.rawValue
+    }
+}
 // /chat/reply 엔드포인트 요청
 struct ReplyRequest: Codable {
     let history: [ChatMessage]
     let user_text: String
+    let level: String
+    init(history: [ChatMessage], user_text: String, level: ChatLevel) {
+        self.history = history
+        self.user_text = user_text
+        self.level = level.rawValue
+    }
 }
 
 // /chat/reply 엔드포인트 응답
@@ -352,9 +363,9 @@ class AudioController: NSObject, ObservableObject, SFSpeechRecognizerDelegate, A
 class ChatViewModel: ObservableObject {
     
     #if DEBUG
-    private let serverURL = "http://85bc2d4a2282.ngrok-free.app"
+    private let serverURL = "http://fe18a029cc8f.ngrok-free.app"
     #else
-    private let serverURL = "http://13.124.208.108:2479"
+    private let serverURL = "http://13.124.208.108:6490"
     #endif
 
     @Published var messages: [ChatMessage] = []
@@ -362,8 +373,11 @@ class ChatViewModel: ObservableObject {
     @Published var errorMessage: String? = nil
     @Published var isChatActive: Bool = true
     @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
+    @Published var currentLevel: ChatLevel = .beginner   // ⬅️ 추가
 
-    // ✅ 추가: 현재 진행 중인 채팅 세션
+
+    // ✅ @Binding var selectedLevel: ChatLevel?       // ⬅️ 추가
+    @State private var showLevelSelect = false   // ⬅️ 추가추가: 현재 진행 중인 채팅 세션
     @Published var currentSession: ChatSession?
 
     private var history: [ChatMessage] {
@@ -377,6 +391,64 @@ class ChatViewModel: ObservableObject {
         self.audioController = controller
         controller.viewModel = self
     }
+    // MARK: - 레벨 기반 시작
+    func startChat(level: ChatLevel) {
+        guard messages.isEmpty else { return }
+        self.currentLevel = level
+        self.currentSession = ChatSession(id: UUID(), startTime: Date(), messages: [])
+
+        Task {
+            await MainActor.run {
+                self.isLoading = true
+                self.errorMessage = nil
+            }
+            do {
+                let url = URL(string: "\(serverURL)/chat/start")!
+                var req = URLRequest(url: url)
+                req.httpMethod = "POST"
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                let body = StartRequest(prompt: level.seedPrompt, level: level)
+                req.httpBody = try JSONEncoder().encode(body)
+
+                print("➡️ /chat/start\n\(req.curlString)")
+
+                let t0 = Date()
+                let (data, resp) = try await URLSession.shared.data(for: req)
+                let ms = Int(Date().timeIntervalSince(t0) * 1000)
+
+                guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+                print("⬅️ /chat/start [\(http.statusCode)] \(ms)ms CT=\(http.value(forHTTPHeaderField: "Content-Type") ?? "-") bytes=\(data.count)")
+                if http.statusCode != 200 {
+                    print("⛔️ RAW BODY:\n\(NetLog.prettyJSON(data))")
+                    throw NSError(domain: "HTTP", code: http.statusCode,
+                                  userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
+                }
+
+                do {
+                    let res = try JSONDecoder().decode(StartResponse.self, from: data)
+                    print("✅ Decoded StartResponse: \(res.assistant_text)")
+                    let msg = ChatMessage(role: "assistant", text: res.assistant_text)
+                    await MainActor.run {
+                        self.messages.append(msg)
+                        self.currentSession?.messages.append(msg)
+                        self.isLoading = false
+                        self.audioController.speak(res.assistant_text)
+                    }
+                } catch {
+                    print("❌ Decode StartResponse failed: \(NetLog.decodeErrorDescription(error, data: data))")
+                    print("📦 RAW JSON:\n\(NetLog.prettyJSON(data))")
+                    throw error
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
+                    self.errorMessage = "Failed to start chat: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+
 
     func startChat() {
         guard messages.isEmpty else { return }
@@ -420,35 +492,51 @@ class ChatViewModel: ObservableObject {
     
     func sendRecognizedText(_ text: String) {
         guard !text.isEmpty && !isLoading && isChatActive else { return }
-        
+
         let userMessage = ChatMessage(role: "user", text: text)
-        
         DispatchQueue.main.async {
             self.messages.append(userMessage)
-            self.currentSession?.messages.append(userMessage) // ✅ 추가: 세션에 메시지 저장
+            self.currentSession?.messages.append(userMessage)
             self.isLoading = true
             self.errorMessage = nil
         }
-        
+
         Task {
             do {
                 let url = URL(string: "\(serverURL)/chat/reply")!
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                
-                let replyRequest = ReplyRequest(history: history, user_text: userMessage.text)
-                request.httpBody = try JSONEncoder().encode(replyRequest)
+                var req = URLRequest(url: url)
+                req.httpMethod = "POST"
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                let payload = ReplyRequest(history: history, user_text: userMessage.text, level: currentLevel)
+                req.httpBody = try JSONEncoder().encode(payload)
 
-                let (data, _) = try await URLSession.shared.data(for: request)
-                let response = try JSONDecoder().decode(ReplyResponse.self, from: data)
-                
-                let assistantMessage = ChatMessage(role: "assistant", text: response.assistant_text)
-                await MainActor.run {
-                    self.messages.append(assistantMessage)
-                    self.currentSession?.messages.append(assistantMessage) // ✅ 추가: 세션에 메시지 저장
-                    self.isLoading = false
-                    self.audioController.speak(assistantMessage.text)
+                print("➡️ /chat/reply\n\(req.curlString)")
+                let t0 = Date()
+                let (data, resp) = try await URLSession.shared.data(for: req)
+                let ms = Int(Date().timeIntervalSince(t0) * 1000)
+
+                guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+                print("⬅️ /chat/reply [\(http.statusCode)] \(ms)ms CT=\(http.value(forHTTPHeaderField: "Content-Type") ?? "-") bytes=\(data.count)")
+                if http.statusCode != 200 {
+                    print("⛔️ RAW BODY:\n\(NetLog.prettyJSON(data))")
+                    throw NSError(domain: "HTTP", code: http.statusCode,
+                                  userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
+                }
+
+                do {
+                    let res = try JSONDecoder().decode(ReplyResponse.self, from: data)
+                    print("✅ Decoded ReplyResponse len=\(res.assistant_text.count)")
+                    let assistant = ChatMessage(role: "assistant", text: res.assistant_text)
+                    await MainActor.run {
+                        self.messages.append(assistant)
+                        self.currentSession?.messages.append(assistant)
+                        self.isLoading = false
+                        self.audioController.speak(assistant.text)
+                    }
+                } catch {
+                    print("❌ Decode ReplyResponse failed: \(NetLog.decodeErrorDescription(error, data: data))")
+                    print("📦 RAW JSON:\n\(NetLog.prettyJSON(data))")
+                    throw error
                 }
             } catch {
                 await MainActor.run {
@@ -458,6 +546,8 @@ class ChatViewModel: ObservableObject {
             }
         }
     }
+
+
     
     func endChat() {
         self.isChatActive = false
@@ -484,6 +574,8 @@ struct ChatView: View {
     @EnvironmentObject var historyManager: ChatHistoryManager
     @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
     let level: ChatLevel                      // ⬅️ 추가
+    var onExit: (() -> Void)? = nil            // ⬅️ 추가
+
 
 
 
@@ -500,6 +592,7 @@ struct ChatView: View {
         VStack(spacing: 0) {
             // 상단 바
             HStack {
+                //뒤로가기 버튼
                 Button(action: {
                     // 나가기 전: 세션 저장(총 대화시간 포함) + 음성 중지
                     if var session = viewModel.currentSession, !session.messages.isEmpty {
@@ -508,6 +601,8 @@ struct ChatView: View {
                         historyManager.saveChatSession(session)
                     }
                     viewModel.audioController.stopSpeaking()
+                    onExit?()                                  // ⬅️ 추가
+
                     withAnimation {
                         showChatView = false
                         viewModel.endChat()
@@ -569,18 +664,17 @@ struct ChatView: View {
                 .padding()
                 .background(Color(.systemBackground))
         }
+        // ChatView 안 onAppear 수정
         .onAppear {
-            // 화면 첫 진입: 완전 새 대화라면 타이머 0부터 + /chat/start 호출
             if viewModel.messages.isEmpty {
                 elapsedSec = 0
-                viewModel.startChat()
+                viewModel.startChat(level: level)   // ⬅️ 레벨 기반 시작
             } else {
-                // 이전 대화가 남아있는 상태로 진입했다면(이 화면을 유지한 채 재표시 등)
-                // 타이머 유지 + 음성만 재개
                 viewModel.isChatActive = true
                 try? viewModel.audioController.startRecognition()
             }
         }
+
         .onDisappear {
             // 다른 화면으로 나갈 때는 TTS만 즉시 중지
             viewModel.audioController.stopSpeaking()
@@ -768,6 +862,10 @@ struct MainView: View {
     @State private var selectedWeekdays: Set<Int> = []
     @State private var selectedInterval: Double = 30
     @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
+//    @Binding var selectedLevel: ChatLevel?       // ⬅️ 추가
+//        @State private var showLevelSelect = false   // ⬅️ 추가
+    var onTapStart: (() -> Void)? = nil        // ⬅️ 추가
+
 
 
     @EnvironmentObject var historyManager: ChatHistoryManager
@@ -809,17 +907,7 @@ struct MainView: View {
 
                             Spacer()
 
-                            // 히스토리(일자별 누적)
-//                            NavigationLink {
-//                                DailyHistoryView()
-//                            } label: {
-//                                Image(systemName: "clock.arrow.circlepath")
-//                                    .font(.title3.weight(.semibold))
-//                                    .foregroundColor(.purple)
-//                                    .padding(8)
-//                                    .background(Color.white.opacity(0.55), in: Circle())
-//                            }
-//                            .accessibilityLabel("히스토리")
+
                             // ✅ 새로: 날짜 목록 페이지로 이동
                                 NavigationLink {
                                     DatesListView()
@@ -831,17 +919,7 @@ struct MainView: View {
                                         .background(Color.white.opacity(0.55), in: Circle())
                                 }
                                 .accessibilityLabel("날짜별 목록")
-                            // ✅ 세션 목록(최근 대화 기록 페이지)
-//                            NavigationLink {
-//                                SessionsListView()
-//                            } label: {
-//                                Image(systemName: "list.bullet.rectangle")
-//                                    .font(.title3.weight(.semibold))
-//                                    .foregroundColor(.purple)
-//                                    .padding(8)
-//                                    .background(Color.white.opacity(0.55), in: Circle())
-//                            }
-//                            .accessibilityLabel("세션 목록")
+  
                         }
                         .padding(.horizontal, 16)
                         .padding(.top, 6)
@@ -914,8 +992,9 @@ struct MainView: View {
                         }
 
                         // 대화하기 버튼
+                        // 대화하기 버튼
                         Button {
-                            withAnimation { showChatView = true }
+                            onTapStart?()                              // ⬅️ 레벨 선택 띄우기 신호만 보냄
                         } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: "waveform.circle.fill")
@@ -934,6 +1013,15 @@ struct MainView: View {
                             .shadow(color: Color.indigo.opacity(0.25), radius: 12, x: 0, y: 8)
                         }
                         .padding(.horizontal, 16)
+//                        // ⬇️ 레벨 선택 풀스크린
+//                        .fullScreenCover(isPresented: $showLevelSelect) {
+//                            LevelSelectView { level in
+//                                self.selectedLevel = level
+//                                self.showLevelSelect = false
+//                                self.showChatView = true
+//                            }
+//                        }
+
 
                         // 오늘 진행
                         let todaySeconds = historyManager.seconds(for: now)
@@ -1760,12 +1848,32 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
 struct ContentView: View {
     @State private var showChatView = false
-    
+    @State private var selectedLevel: ChatLevel? = nil   // ⬅️ 추가
+    @State private var showLevelSelect = false        // ⬅️ 레벨 선택을 최상위에서 관리
+
     var body: some View {
-        if showChatView {
-            ChatView(showChatView: $showChatView)
-        } else {
-            MainView(showChatView: $showChatView)
-        }
-    }
+           ZStack {
+               if showChatView {
+                   ChatView(
+                       showChatView: $showChatView,
+                       level: selectedLevel ?? .beginner,
+                       onExit: {
+                           showLevelSelect = true   // 뒤로가기 → 레벨 선택 다시 열기
+                       }
+                   )
+               } else {
+                   MainView(
+                    onTapStart: { showLevelSelect = true }, showChatView: $showChatView   // ✅ 레벨 선택 띄우기
+                      )
+               }
+           }
+           // ⬇️ 레벨 선택은 항상 최상위에서 띄움(메인/채팅과 독립)
+           .fullScreenCover(isPresented: $showLevelSelect) {
+               LevelSelectView { level in
+                   selectedLevel = level
+                   showLevelSelect = false
+                   showChatView = true                        // ⬅️ 선택 즉시 ChatView 진입
+               }
+           }
+       }
 }
