@@ -374,6 +374,10 @@ class ChatViewModel: ObservableObject {
     @Published var isChatActive: Bool = true
     @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
     @Published var currentLevel: ChatLevel = .beginner   // ⬅️ 추가
+    @Published var dailySentence: String = ""
+    @Published var translation: String = ""   // ✅ 추가
+    @Published var isDailyMode: Bool = false       // 오늘의 문장 대화 모드 여부
+
 
 
     // ✅ @Binding var selectedLevel: ChatLevel?       // ⬅️ 추가
@@ -391,6 +395,119 @@ class ChatViewModel: ObservableObject {
         self.audioController = controller
         controller.viewModel = self
     }
+    
+    func startChatWithDailySentence() {
+        Task {
+            await fetchDailySentence()
+            guard !dailySentence.isEmpty else { return }
+
+            self.isDailyMode = true
+            self.currentSession = ChatSession(id: UUID(), startTime: Date(), messages: [])
+
+            do {
+                let url = URL(string: "\(serverURL)/chat/start_daily")!
+                var req = URLRequest(url: url)
+                req.httpMethod = "POST"
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                let body: [String: Any] = ["sentence": dailySentence, "level": currentLevel.rawValue]
+                req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+                let (data, _) = try await URLSession.shared.data(for: req)
+                let res = try JSONDecoder().decode(StartResponse.self, from: data)
+
+                let msg = ChatMessage(role: "assistant", text: res.assistant_text)
+                await MainActor.run {
+                    self.messages.append(msg)
+                    self.currentSession?.messages.append(msg)
+                    self.audioController.speak(res.assistant_text)
+                }
+            } catch {
+                print("❌ Failed to start daily chat: \(error)")
+            }
+        }
+    }
+
+    // ✅ ChatViewModel 내부에 DTO 추가
+    private struct DailyReplyReqDTO: Codable {
+        let history: [[String: String]]
+        let user_text: String
+        let sentence: String
+        let level: String
+    }
+
+    private struct DailyReplyResDTO: Codable {
+        let assistant_text: String
+    }
+    @MainActor
+    func fetchDailySentence() async {
+        do {
+            guard let url = URL(string: "\(serverURL)/daily_sentence") else { return }
+            let (data, _) = try await URLSession.shared.data(from: url)
+            struct DailySentenceResponse: Codable { let date: String; let sentence: String; let translation: String }
+            let decoded = try JSONDecoder().decode(DailySentenceResponse.self, from: data)
+            self.dailySentence = decoded.sentence
+        } catch {
+            print("❌ Failed to fetch daily sentence: \(error)")
+        }
+    }
+
+    // ✅ 오늘의 문장 학습용 reply
+    func sendDailyReply(userText: String, sentence: String) {
+        // 먼저 사용자 발화 UI에 반영
+        let userMsg = ChatMessage(role: "user", text: userText)
+        DispatchQueue.main.async {
+            self.messages.append(userMsg)
+            self.currentSession?.messages.append(userMsg)
+            self.isLoading = true
+            self.errorMessage = nil
+        }
+
+        Task {
+            do {
+                // 1) 히스토리 -> 서버 스키마([[String:String]])로 변환
+                let historyPayload: [[String: String]] = self.messages
+                    .filter { $0.role != "system" }
+                    .map { ["role": $0.role, "text": $0.text] }
+
+                // 2) 바디를 명시적 DTO로 생성 → 타입 모호성 제거
+                let payload = DailyReplyReqDTO(
+                    history: historyPayload,
+                    user_text: userText,
+                    sentence: sentence,
+                    level: self.currentLevel.rawValue
+                )
+                let bodyData = try JSONEncoder().encode(payload)
+
+                // 3) 요청
+                guard let url = URL(string: "\(serverURL)/chat/daily_reply") else { return }
+                var req = URLRequest(url: url)
+                req.httpMethod = "POST"
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                req.httpBody = bodyData
+
+                let (data, _) = try await URLSession.shared.data(for: req)
+
+                // 4) 응답 디코딩
+                let res = try JSONDecoder().decode(DailyReplyResDTO.self, from: data)
+
+                // 5) 어시스턴트 메시지 반영 + TTS
+                let assistant = ChatMessage(role: "assistant", text: res.assistant_text)
+                await MainActor.run {
+                    self.messages.append(assistant)
+                    self.currentSession?.messages.append(assistant)
+                    self.isLoading = false
+                    self.audioController.speak(assistant.text)
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
+                    self.errorMessage = "Failed daily reply: \(error.localizedDescription)"
+                }
+                print("❌ Failed to send daily reply: \(error)")
+            }
+        }
+    }
+
     // MARK: - 레벨 기반 시작
     func startChat(level: ChatLevel) {
         guard messages.isEmpty else { return }
@@ -493,6 +610,12 @@ class ChatViewModel: ObservableObject {
     func sendRecognizedText(_ text: String) {
         guard !text.isEmpty && !isLoading && isChatActive else { return }
 
+        if isDailyMode {
+            sendDailyReply(userText: text)   // ✅ 오늘의 문장 학습 흐름
+            return
+        }
+
+        // ⬇️ 기존 일반 대화 흐름 (그대로 유지)
         let userMessage = ChatMessage(role: "user", text: text)
         DispatchQueue.main.async {
             self.messages.append(userMessage)
@@ -500,7 +623,6 @@ class ChatViewModel: ObservableObject {
             self.isLoading = true
             self.errorMessage = nil
         }
-
         Task {
             do {
                 let url = URL(string: "\(serverURL)/chat/reply")!
@@ -510,33 +632,15 @@ class ChatViewModel: ObservableObject {
                 let payload = ReplyRequest(history: history, user_text: userMessage.text, level: currentLevel)
                 req.httpBody = try JSONEncoder().encode(payload)
 
-                print("➡️ /chat/reply\n\(req.curlString)")
-                let t0 = Date()
-                let (data, resp) = try await URLSession.shared.data(for: req)
-                let ms = Int(Date().timeIntervalSince(t0) * 1000)
+                let (data, _) = try await URLSession.shared.data(for: req)
+                let res = try JSONDecoder().decode(ReplyResponse.self, from: data)
 
-                guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-                print("⬅️ /chat/reply [\(http.statusCode)] \(ms)ms CT=\(http.value(forHTTPHeaderField: "Content-Type") ?? "-") bytes=\(data.count)")
-                if http.statusCode != 200 {
-                    print("⛔️ RAW BODY:\n\(NetLog.prettyJSON(data))")
-                    throw NSError(domain: "HTTP", code: http.statusCode,
-                                  userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
-                }
-
-                do {
-                    let res = try JSONDecoder().decode(ReplyResponse.self, from: data)
-                    print("✅ Decoded ReplyResponse len=\(res.assistant_text.count)")
-                    let assistant = ChatMessage(role: "assistant", text: res.assistant_text)
-                    await MainActor.run {
-                        self.messages.append(assistant)
-                        self.currentSession?.messages.append(assistant)
-                        self.isLoading = false
-                        self.audioController.speak(assistant.text)
-                    }
-                } catch {
-                    print("❌ Decode ReplyResponse failed: \(NetLog.decodeErrorDescription(error, data: data))")
-                    print("📦 RAW JSON:\n\(NetLog.prettyJSON(data))")
-                    throw error
+                let assistant = ChatMessage(role: "assistant", text: res.assistant_text)
+                await MainActor.run {
+                    self.messages.append(assistant)
+                    self.currentSession?.messages.append(assistant)
+                    self.isLoading = false
+                    self.audioController.speak(assistant.text)
                 }
             } catch {
                 await MainActor.run {
@@ -547,13 +651,60 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    private func sendDailyReply(userText: String) {
+        let userMessage = ChatMessage(role: "user", text: userText)
+        DispatchQueue.main.async {
+            self.messages.append(userMessage)
+            self.currentSession?.messages.append(userMessage)
+            self.isLoading = true
+            self.errorMessage = nil
+        }
+
+        Task {
+            do {
+                let url = URL(string: "\(serverURL)/chat/daily_reply")!
+                var req = URLRequest(url: url)
+                req.httpMethod = "POST"
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+                // 서버에 history를 Msg 배열 형식으로 넘김
+                let msgHist = self.history.map { ["role": $0.role, "text": $0.text] }
+                let body: [String: Any] = [
+                    "history": msgHist,
+                    "user_text": userText,
+                    "sentence": self.dailySentence,
+                    "level": self.currentLevel.rawValue
+                ]
+                req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+                let (data, _) = try await URLSession.shared.data(for: req)
+                struct DailyReplyRes: Codable { let assistant_text: String }
+                let res = try JSONDecoder().decode(DailyReplyRes.self, from: data)
+
+                let assistant = ChatMessage(role: "assistant", text: res.assistant_text)
+                await MainActor.run {
+                    self.messages.append(assistant)
+                    self.currentSession?.messages.append(assistant)
+                    self.isLoading = false
+                    self.audioController.speak(assistant.text)
+                }
+            } catch {
+                await MainActor.run {
+                    self.isLoading = false
+                    self.errorMessage = "Failed daily reply: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
 
     
     func endChat() {
         self.isChatActive = false
+        self.isDailyMode = false           // ✅ 모드 리셋
         audioController.forceStopRecognition()
         self.messages.append(ChatMessage(role: "system", text: "대화가 종료되었습니다."))
     }
+
     
     func resumeChat() {
             // ✅ 기존 메시지 유지하고 대화만 다시 활성화
@@ -573,7 +724,7 @@ struct ChatView: View {
     @Binding var showChatView: Bool
     @EnvironmentObject var historyManager: ChatHistoryManager
     @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
-    let level: ChatLevel                      // ⬅️ 추가
+    let mode: ChatMode               // ✅ level or dailySentence
     var onExit: (() -> Void)? = nil            // ⬅️ 추가
 
 
@@ -667,13 +818,17 @@ struct ChatView: View {
         // ChatView 안 onAppear 수정
         .onAppear {
             if viewModel.messages.isEmpty {
-                elapsedSec = 0
-                viewModel.startChat(level: level)   // ⬅️ 레벨 기반 시작
+                switch mode {
+                case .level(let lvl):
+                    viewModel.startChat(level: lvl)
+                case .dailySentence:
+                    viewModel.startChatWithDailySentence()
+                }
             } else {
-                viewModel.isChatActive = true
                 try? viewModel.audioController.startRecognition()
             }
         }
+
 
         .onDisappear {
             // 다른 화면으로 나갈 때는 TTS만 즉시 중지
@@ -865,6 +1020,7 @@ struct MainView: View {
 //    @Binding var selectedLevel: ChatLevel?       // ⬅️ 추가
 //        @State private var showLevelSelect = false   // ⬅️ 추가
     var onTapStart: (() -> Void)? = nil        // ⬅️ 추가
+    @StateObject private var sentenceVM = DailySentenceViewModel()
 
 
 
@@ -990,6 +1146,32 @@ struct MainView: View {
                                 }
                             }
                         }
+
+                        SectionCard {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("오늘의 문장")
+                                    .font(.headline)
+
+                                if sentenceVM.dailySentence.isEmpty {
+                                    Text("불러오는 중...")
+                                        .foregroundColor(.secondary)
+                                } else {
+                                    Text("“\(sentenceVM.dailySentence)”")
+                                        .font(.title3)
+                                        .fontWeight(.semibold)
+                                        .padding(.top, 4)
+                                    Text(sentenceVM.translation)
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        .onAppear {
+                            sentenceVM.fetchDailySentence()
+                        }
+
+
+
 
                         // 대화하기 버튼
                         // 대화하기 버튼
@@ -1848,15 +2030,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
 struct ContentView: View {
     @State private var showChatView = false
-    @State private var selectedLevel: ChatLevel? = nil   // ⬅️ 추가
+    @State private var selectedMode: ChatMode? = nil    // ✅ 변경
     @State private var showLevelSelect = false        // ⬅️ 레벨 선택을 최상위에서 관리
+    
 
     var body: some View {
            ZStack {
                if showChatView {
                    ChatView(
                        showChatView: $showChatView,
-                       level: selectedLevel ?? .beginner,
+                       mode: selectedMode ?? .level(.beginner),   // ✅ 기본값은 beginner
                        onExit: {
                            showLevelSelect = true   // 뒤로가기 → 레벨 선택 다시 열기
                        }
@@ -1869,8 +2052,8 @@ struct ContentView: View {
            }
            // ⬇️ 레벨 선택은 항상 최상위에서 띄움(메인/채팅과 독립)
            .fullScreenCover(isPresented: $showLevelSelect) {
-               LevelSelectView { level in
-                   selectedLevel = level
+               LevelSelectView { mode in
+                   selectedMode = mode
                    showLevelSelect = false
                    showChatView = true                        // ⬅️ 선택 즉시 ChatView 진입
                }

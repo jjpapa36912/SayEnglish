@@ -3,7 +3,7 @@ import Foundation
 import SwiftUI
 
 struct LevelSelectView: View {
-    var onPick: (ChatLevel) -> Void
+    var onPick: (ChatMode) -> Void
     @Environment(\.dismiss) var dismiss
     @StateObject private var bannerCtrl = BannerAdController()
 
@@ -40,14 +40,32 @@ struct LevelSelectView: View {
                     .padding(.bottom, 10)
 
                 // 레벨 카드 3개
-                VStack(spacing: 14) {
-                    LevelCard(level: .beginner) { onPick(.beginner) }
-                    LevelCard(level: .intermediate) { onPick(.intermediate) }
-                    LevelCard(level: .advanced) { onPick(.advanced) }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
+                VStack(spacing: 20) {
+                            // 기존 3개 레벨
+                            LevelCard(level: .beginner) { onPick(.level(.beginner)) }
+                            LevelCard(level: .intermediate) { onPick(.level(.intermediate)) }
+                            LevelCard(level: .advanced) { onPick(.level(.advanced)) }
 
+                            // 오늘의 문장 카드
+                            Button {
+                                onPick(.dailySentence)
+                            } label: {
+                                HStack {
+                                    Text("📝 오늘의 문장으로 대화하기")
+                                        .font(.headline)
+                                    Spacer()
+                                    Text("매일 자정 업데이트")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding()
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16).fill(.thinMaterial)
+                                )
+                            }
+
+                        }
+                        .padding()
                 Spacer(minLength: 20)
             }
         }
