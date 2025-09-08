@@ -6,7 +6,9 @@ struct LevelSelectView: View {
     var onPick: (ChatMode) -> Void
     @Environment(\.dismiss) var dismiss
     @StateObject private var bannerCtrl = BannerAdController()
-
+    @State private var bannerHeight: CGFloat = 0
+        @State private var bannerMounted = false
+        @State private var debugText: String = ""
     var body: some View {
         ZStack {
             LinearGradient(colors: [Color.purple.opacity(0.9), Color.indigo.opacity(0.9)],
@@ -35,10 +37,42 @@ struct LevelSelectView: View {
                 .padding(.bottom, 8)
 
                 // 배너
-                BannerAdView(controller: bannerCtrl)
-                    .frame(height: 50)
-                    .padding(.bottom, 10)
-
+//                BannerAdView(controller: bannerCtrl)
+//                    .frame(height: 50)
+//                    .padding(.bottom, 10)
+                AdFitVerboseBannerView(
+                                   clientId: "DAN-0pxnvDh8ytVm0EsZ",
+                                   adUnitSize: "320x50",
+                                   timeoutSec: 8,
+                                   maxRetries: 2
+                               ) { event in
+                                   switch event {
+                                   case .begin(let attempt):
+                                       debugText = "BEGIN attempt \(attempt)"
+                                   case .willLoad:
+                                       debugText = "WILL_LOAD"
+                                   case .success(let ms):
+                                       bannerHeight = 50        // ✅ 성공 시에만 펼치기
+                                       debugText = "SUCCESS \(ms)ms"
+                                   case .fail(let err, let attempt):
+                                       bannerHeight = 0         // 실패 시 접기
+                                       debugText = "FAIL(\(attempt)): \(err.localizedDescription)"
+                                   case .timeout(let sec, let attempt):
+                                       bannerHeight = 0         // 타임아웃 시 접기
+                                       debugText = "TIMEOUT \(sec)s (attempt \(attempt))"
+                                   case .retryScheduled(let after, let next):
+                                       debugText = "RETRY in \(after)s → \(next)"
+                                   case .disposed:
+                                       debugText = "disposed"
+                                   }
+                               }
+                               .id("AdFitBannerFixedID")        // ✅ 아이디 고정 → 재생성 방지
+                               .frame(height: bannerHeight)     // 성공 전 0, 성공 시 50
+                               .frame(maxWidth: .infinity)
+                               .background(.ultraThinMaterial)
+                               .animation(.easeInOut(duration: 0.25), value: bannerHeight)
+                
+                
                 // 레벨 카드 3개
                 VStack(spacing: 20) {
                             // 기존 3개 레벨

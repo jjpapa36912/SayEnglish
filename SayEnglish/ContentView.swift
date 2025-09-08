@@ -726,6 +726,9 @@ struct ChatView: View {
     @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
     let mode: ChatMode               // ✅ level or dailySentence
     var onExit: (() -> Void)? = nil            // ⬅️ 추가
+    @State private var bannerHeight: CGFloat = 0
+    @State private var bannerMounted = false
+    @State private var debugText: String = ""
 
 
 
@@ -781,9 +784,45 @@ struct ChatView: View {
             
             
             // ⬇️ 배너
-            BannerAdView(controller: bannerCtrl)
-                .frame(height: 50)
-                .padding(.bottom, 6)
+//            BannerAdView(controller: bannerCtrl)
+//                .frame(height: 50)
+//                .padding(.bottom, 6)
+            // ↓ 하단 배너 (320x100)
+            if bannerMounted {
+                AdFitVerboseBannerView(
+                    clientId: "DAN-0pxnvDh8ytVm0EsZ",
+                    adUnitSize: "320x50",
+                    timeoutSec: 8,
+                    maxRetries: 2
+                ) { event in
+                    switch event {
+                    case .begin(let attempt):
+                        debugText = "BEGIN attempt \(attempt)"
+                    case .willLoad:
+                        debugText = "WILL_LOAD"
+                    case .success(let ms):
+                        bannerHeight = 50        // ✅ 성공 시에만 펼치기
+                        debugText = "SUCCESS \(ms)ms"
+                    case .fail(let err, let attempt):
+                        bannerHeight = 0         // 실패 시 접기
+                        debugText = "FAIL(\(attempt)): \(err.localizedDescription)"
+                    case .timeout(let sec, let attempt):
+                        bannerHeight = 0         // 타임아웃 시 접기
+                        debugText = "TIMEOUT \(sec)s (attempt \(attempt))"
+                    case .retryScheduled(let after, let next):
+                        debugText = "RETRY in \(after)s → \(next)"
+                    case .disposed:
+                        debugText = "disposed"
+                    }
+                }
+                .id("AdFitBannerFixedID")        // ✅ 아이디 고정 → 재생성 방지
+                .frame(height: bannerHeight)     // 성공 전 0, 성공 시 50
+                .frame(maxWidth: .infinity)
+                .background(.ultraThinMaterial)
+                .animation(.easeInOut(duration: 0.25), value: bannerHeight)
+            }
+
+                       
             // 메시지 리스트
             ScrollView {
                 VStack(alignment: .leading, spacing: 15) {
@@ -817,6 +856,8 @@ struct ChatView: View {
         }
         // ChatView 안 onAppear 수정
         .onAppear {
+            if !bannerMounted { bannerMounted = true }   // ✅ 최초 1회만 렌더
+
             if viewModel.messages.isEmpty {
                 switch mode {
                 case .level(let lvl):
@@ -928,7 +969,9 @@ struct DetailedChatView: View {
     let session: ChatSession
     @Environment(\.dismiss) var dismiss
     @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
-
+    @State private var bannerHeight: CGFloat = 0
+        @State private var bannerMounted = false
+        @State private var debugText: String = ""
     // 로컬 TTS 전용 합성기 (ChatViewModel에 의존 X)
     @State private var synthesizer = AVSpeechSynthesizer()
     
@@ -977,9 +1020,45 @@ struct DetailedChatView: View {
             .padding(.top)
             .padding(.bottom, 5)
             // ⬇️ 배너
-                        BannerAdView(controller: bannerCtrl)
-                            .frame(height: 50)
-                            .padding(.bottom, 6)
+//                        BannerAdView(controller: bannerCtrl)
+//                            .frame(height: 50)
+//                            .padding(.bottom, 6)
+            
+            
+                            AdFitVerboseBannerView(
+                                clientId: "DAN-0pxnvDh8ytVm0EsZ",
+                                adUnitSize: "320x50",
+                                timeoutSec: 8,
+                                maxRetries: 2
+                            ) { event in
+                                switch event {
+                                case .begin(let attempt):
+                                    debugText = "BEGIN attempt \(attempt)"
+                                case .willLoad:
+                                    debugText = "WILL_LOAD"
+                                case .success(let ms):
+                                    bannerHeight = 50        // ✅ 성공 시에만 펼치기
+                                    debugText = "SUCCESS \(ms)ms"
+                                case .fail(let err, let attempt):
+                                    bannerHeight = 0         // 실패 시 접기
+                                    debugText = "FAIL(\(attempt)): \(err.localizedDescription)"
+                                case .timeout(let sec, let attempt):
+                                    bannerHeight = 0         // 타임아웃 시 접기
+                                    debugText = "TIMEOUT \(sec)s (attempt \(attempt))"
+                                case .retryScheduled(let after, let next):
+                                    debugText = "RETRY in \(after)s → \(next)"
+                                case .disposed:
+                                    debugText = "disposed"
+                                }
+                            }
+                            .id("AdFitBannerFixedID")        // ✅ 아이디 고정 → 재생성 방지
+                            .frame(height: bannerHeight)     // 성공 전 0, 성공 시 50
+                            .frame(maxWidth: .infinity)
+                            .background(.ultraThinMaterial)
+                            .animation(.easeInOut(duration: 0.25), value: bannerHeight)
+            
+            
+            
             ScrollView {
                 VStack(alignment: .leading, spacing: 15) {
                     ForEach(session.messages) { message in
@@ -1021,8 +1100,9 @@ struct MainView: View {
 //        @State private var showLevelSelect = false   // ⬅️ 추가
     var onTapStart: (() -> Void)? = nil        // ⬅️ 추가
     @StateObject private var sentenceVM = DailySentenceViewModel()
-
-
+    @State private var bannerHeight: CGFloat = 0
+        @State private var bannerMounted = false
+        @State private var debugText: String = ""
 
     @EnvironmentObject var historyManager: ChatHistoryManager
     @Binding var showChatView: Bool
@@ -1051,9 +1131,40 @@ struct MainView: View {
                 ScrollView {
                     VStack(spacing: 18) {
 
-                        BannerAdView(controller: bannerCtrl)
-                                                    .frame(height: 50) // 표준 320x50
-                                                    .padding(.top, 6)
+//                        BannerAdView(controller: bannerCtrl)
+//                                                    .frame(height: 50) // 표준 320x50
+//                                                    .padding(.top, 6)
+                        AdFitVerboseBannerView(
+                            clientId: "DAN-0pxnvDh8ytVm0EsZ",
+                            adUnitSize: "320x50",
+                            timeoutSec: 8,
+                            maxRetries: 2
+                        ) { event in
+                            switch event {
+                            case .begin(let attempt):
+                                debugText = "BEGIN attempt \(attempt)"
+                            case .willLoad:
+                                debugText = "WILL_LOAD"
+                            case .success(let ms):
+                                bannerHeight = 50        // ✅ 성공 시에만 펼치기
+                                debugText = "SUCCESS \(ms)ms"
+                            case .fail(let err, let attempt):
+                                bannerHeight = 0         // 실패 시 접기
+                                debugText = "FAIL(\(attempt)): \(err.localizedDescription)"
+                            case .timeout(let sec, let attempt):
+                                bannerHeight = 0         // 타임아웃 시 접기
+                                debugText = "TIMEOUT \(sec)s (attempt \(attempt))"
+                            case .retryScheduled(let after, let next):
+                                debugText = "RETRY in \(after)s → \(next)"
+                            case .disposed:
+                                debugText = "disposed"
+                            }
+                        }
+                        .id("AdFitBannerFixedID")        // ✅ 아이디 고정 → 재생성 방지
+                        .frame(height: bannerHeight)     // 성공 전 0, 성공 시 50
+                        .frame(maxWidth: .infinity)
+                        .background(.ultraThinMaterial)
+                        .animation(.easeInOut(duration: 0.25), value: bannerHeight)
                         
                         // 상단 바: 타이틀 + [히스토리] [세션] 아이콘
                         HStack(spacing: 10) {
@@ -1681,7 +1792,9 @@ struct DatesListView: View {
     @Environment(\.dismiss) var dismiss
 
     @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
-
+    @State private var bannerHeight: CGFloat = 0
+        @State private var bannerMounted = false
+        @State private var debugText: String = ""
     private func mmss(_ sec: Int) -> String {
         let m = sec / 60, s = sec % 60
         return String(format: "%02d:%02d", m, s)
@@ -1715,9 +1828,45 @@ struct DatesListView: View {
                 .padding(.bottom, 8)
 
                 // ⬇️ 배너 (상단 바 바로 아래)
-                                BannerAdView(controller: bannerCtrl)
-                                    .frame(height: 50)
-                                    .padding(.bottom, 8)
+//                                BannerAdView(controller: bannerCtrl)
+//                                    .frame(height: 50)
+//                                    .padding(.bottom, 8)
+                AdFitVerboseBannerView(
+                    clientId: "DAN-0pxnvDh8ytVm0EsZ",
+                    adUnitSize: "320x50",
+                    timeoutSec: 8,
+                    maxRetries: 2
+                ) { event in
+                    switch event {
+                    case .begin(let attempt):
+                        debugText = "BEGIN attempt \(attempt)"
+                    case .willLoad:
+                        debugText = "WILL_LOAD"
+                    case .success(let ms):
+                        bannerHeight = 50        // ✅ 성공 시에만 펼치기
+                        debugText = "SUCCESS \(ms)ms"
+                    case .fail(let err, let attempt):
+                        bannerHeight = 0         // 실패 시 접기
+                        debugText = "FAIL(\(attempt)): \(err.localizedDescription)"
+                    case .timeout(let sec, let attempt):
+                        bannerHeight = 0         // 타임아웃 시 접기
+                        debugText = "TIMEOUT \(sec)s (attempt \(attempt))"
+                    case .retryScheduled(let after, let next):
+                        debugText = "RETRY in \(after)s → \(next)"
+                    case .disposed:
+                        debugText = "disposed"
+                    }
+                }
+                .id("AdFitBannerFixedID")        // ✅ 아이디 고정 → 재생성 방지
+                .frame(height: bannerHeight)     // 성공 전 0, 성공 시 50
+                .frame(maxWidth: .infinity)
+                .background(.ultraThinMaterial)
+                .animation(.easeInOut(duration: 0.25), value: bannerHeight)
+                
+                
+                
+                
+                
                 // 날짜 리스트
                 ScrollView {
                     VStack(spacing: 14) {
@@ -1781,7 +1930,9 @@ struct SessionsByDateView: View {
     @EnvironmentObject var historyManager: ChatHistoryManager
     @Environment(\.dismiss) var dismiss
     @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
-
+    @State private var bannerHeight: CGFloat = 0
+        @State private var bannerMounted = false
+        @State private var debugText: String = ""
     private func mmss(_ sec: Int) -> String {
         let m = sec / 60, s = sec % 60
         return String(format: "%02d:%02d", m, s)
@@ -1814,9 +1965,43 @@ struct SessionsByDateView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 8)
                 // ⬇️ 배너
-                                BannerAdView(controller: bannerCtrl)
-                                    .frame(height: 50)
-                                    .padding(.bottom, 8)
+//                                BannerAdView(controller: bannerCtrl)
+//                                    .frame(height: 50)
+//                                    .padding(.bottom, 8)
+                AdFitVerboseBannerView(
+                    clientId: "DAN-0pxnvDh8ytVm0EsZ",
+                    adUnitSize: "320x50",
+                    timeoutSec: 8,
+                    maxRetries: 2
+                ) { event in
+                    switch event {
+                    case .begin(let attempt):
+                        debugText = "BEGIN attempt \(attempt)"
+                    case .willLoad:
+                        debugText = "WILL_LOAD"
+                    case .success(let ms):
+                        bannerHeight = 50        // ✅ 성공 시에만 펼치기
+                        debugText = "SUCCESS \(ms)ms"
+                    case .fail(let err, let attempt):
+                        bannerHeight = 0         // 실패 시 접기
+                        debugText = "FAIL(\(attempt)): \(err.localizedDescription)"
+                    case .timeout(let sec, let attempt):
+                        bannerHeight = 0         // 타임아웃 시 접기
+                        debugText = "TIMEOUT \(sec)s (attempt \(attempt))"
+                    case .retryScheduled(let after, let next):
+                        debugText = "RETRY in \(after)s → \(next)"
+                    case .disposed:
+                        debugText = "disposed"
+                    }
+                }
+                .id("AdFitBannerFixedID")        // ✅ 아이디 고정 → 재생성 방지
+                .frame(height: bannerHeight)     // 성공 전 0, 성공 시 50
+                .frame(maxWidth: .infinity)
+                .background(.ultraThinMaterial)
+                .animation(.easeInOut(duration: 0.25), value: bannerHeight)
+                
+                
+                
                 // 세션 리스트
                 List {
                     ForEach(historyManager.sessions(on: date)) { session in

@@ -4,40 +4,47 @@
 <dict>
 	<key>SchemeUserState</key>
 	<dict>
-		<key>Google-Mobile-Ads-SDK-GoogleMobileAdsResources.xcscheme</key>
-		<dict>
-			<key>isShown</key>
-			<false/>
-			<key>orderHint</key>
-			<integer>1</integer>
-		</dict>
-		<key>Google-Mobile-Ads-SDK.xcscheme</key>
+		<key>AdFitSDK.xcscheme</key>
 		<dict>
 			<key>isShown</key>
 			<false/>
 			<key>orderHint</key>
 			<integer>0</integer>
 		</dict>
-		<key>GoogleUserMessagingPlatform-UserMessagingPlatformResources.xcscheme</key>
-		<dict>
-			<key>isShown</key>
-			<false/>
-			<key>orderHint</key>
-			<integer>3</integer>
-		</dict>
-		<key>GoogleUserMessagingPlatform.xcscheme</key>
+		<key>Google-Mobile-Ads-SDK-GoogleMobileAdsResources.xcscheme</key>
 		<dict>
 			<key>isShown</key>
 			<false/>
 			<key>orderHint</key>
 			<integer>2</integer>
 		</dict>
-		<key>Pods-SayEnglish.xcscheme</key>
+		<key>Google-Mobile-Ads-SDK.xcscheme</key>
+		<dict>
+			<key>isShown</key>
+			<false/>
+			<key>orderHint</key>
+			<integer>1</integer>
+		</dict>
+		<key>GoogleUserMessagingPlatform-UserMessagingPlatformResources.xcscheme</key>
 		<dict>
 			<key>isShown</key>
 			<false/>
 			<key>orderHint</key>
 			<integer>4</integer>
+		</dict>
+		<key>GoogleUserMessagingPlatform.xcscheme</key>
+		<dict>
+			<key>isShown</key>
+			<false/>
+			<key>orderHint</key>
+			<integer>3</integer>
+		</dict>
+		<key>Pods-SayEnglish.xcscheme</key>
+		<dict>
+			<key>isShown</key>
+			<false/>
+			<key>orderHint</key>
+			<integer>5</integer>
 		</dict>
 	</dict>
 	<key>SuppressBuildableAutocreation</key>
