@@ -1099,6 +1099,8 @@ struct MainView: View {
     @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
 //    @Binding var selectedLevel: ChatLevel?       // ⬅️ 추가
 //        @State private var showLevelSelect = false   // ⬅️ 추가
+    @Environment(\.scenePhase) private var scenePhase
+
     var onTapStart: (() -> Void)? = nil        // ⬅️ 추가
     @StateObject private var sentenceVM = DailySentenceViewModel()
     @State private var showBanner = false     // 노출 여부
@@ -1267,7 +1269,9 @@ struct MainView: View {
                                 }
                             }
                         }
-                        .onAppear { sentenceVM.fetchDailySentence() }
+                        .onAppear {
+                            Task { await sentenceVM.refreshIfDateChanged() }
+                        }
 
                         Button {
                             onTapStart?()
@@ -1361,6 +1365,12 @@ struct MainView: View {
         } message: {
             Text("알람은 최대 5개까지 저장할 수 있어요.")
         }
+        .onChange(of: scenePhase) { newPhase in
+            if newPhase == .active {
+                Task { await sentenceVM.refreshIfDateChanged() }
+            }
+        }
+
     }
 
 
