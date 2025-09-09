@@ -9,6 +9,8 @@ struct LevelSelectView: View {
     @State private var bannerHeight: CGFloat = 0
         @State private var bannerMounted = false
         @State private var debugText: String = ""
+    @State private var showBanner = false     // 노출 여부
+
     var body: some View {
         ZStack {
             LinearGradient(colors: [Color.purple.opacity(0.9), Color.indigo.opacity(0.9)],
@@ -40,37 +42,38 @@ struct LevelSelectView: View {
 //                BannerAdView(controller: bannerCtrl)
 //                    .frame(height: 50)
 //                    .padding(.bottom, 10)
-                AdFitVerboseBannerView(
-                                   clientId: "DAN-0pxnvDh8ytVm0EsZ",
-                                   adUnitSize: "320x50",
-                                   timeoutSec: 8,
-                                   maxRetries: 2
-                               ) { event in
-                                   switch event {
-                                   case .begin(let attempt):
-                                       debugText = "BEGIN attempt \(attempt)"
-                                   case .willLoad:
-                                       debugText = "WILL_LOAD"
-                                   case .success(let ms):
-                                       bannerHeight = 50        // ✅ 성공 시에만 펼치기
-                                       debugText = "SUCCESS \(ms)ms"
-                                   case .fail(let err, let attempt):
-                                       bannerHeight = 0         // 실패 시 접기
-                                       debugText = "FAIL(\(attempt)): \(err.localizedDescription)"
-                                   case .timeout(let sec, let attempt):
-                                       bannerHeight = 0         // 타임아웃 시 접기
-                                       debugText = "TIMEOUT \(sec)s (attempt \(attempt))"
-                                   case .retryScheduled(let after, let next):
-                                       debugText = "RETRY in \(after)s → \(next)"
-                                   case .disposed:
-                                       debugText = "disposed"
-                                   }
-                               }
-                               .id("AdFitBannerFixedID")        // ✅ 아이디 고정 → 재생성 방지
-                               .frame(height: bannerHeight)     // 성공 전 0, 성공 시 50
-                               .frame(maxWidth: .infinity)
-                               .background(.ultraThinMaterial)
-                               .animation(.easeInOut(duration: 0.25), value: bannerHeight)
+                .safeAreaInset(edge: .top)  {
+                                AdFitVerboseBannerView(
+                                    clientId: "DAN-0pxnvDh8ytVm0EsZ",
+                                    adUnitSize: "320x50",
+                                    timeoutSec: 8,
+                                    maxRetries: 2
+                                ) { event in
+                                    switch event {
+                                    case .begin(let n):  debugText = "BEGIN \(n)"
+                                    case .willLoad:      debugText = "WILL_LOAD"
+                                    case .success(let ms):
+                                        showBanner = true          // ✅ 성공 시 보이기
+                                        debugText = "SUCCESS \(ms)ms"
+                                    case .fail(let err, let n):
+                                        showBanner = false         // 실패 시 숨기기
+                                        debugText = "FAIL(\(n)): \(err.localizedDescription)"
+                                    case .timeout(let sec, let n):
+                                        showBanner = false
+                                        debugText = "TIMEOUT \(sec)s (attempt \(n))"
+                                    case .retryScheduled(let after, let next):
+                                        debugText = "RETRY in \(after)s → \(next)"
+                                    case .disposed:
+                                        debugText = "disposed"
+                                    }
+                                }
+                                .frame(width: 320, height: 50)     // 뷰 자체는 실제 크기 유지
+                                .opacity(showBanner ? 1 : 0)       // 🔸 화면에서는 숨김/표시만 제어
+                                .allowsHitTesting(showBanner)
+                                .padding(.bottom, 8)
+                                .animation(.easeInOut(duration: 0.2), value: showBanner)
+                                }
+
                 
                 
                 // 레벨 카드 3개

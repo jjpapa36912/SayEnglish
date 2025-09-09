@@ -107,6 +107,8 @@ final class AdFitVerboseHostView: UIView, AdFitBannerAdViewDelegate {
         didLoadOnce = true
     }
 
+    
+    
     private func startLoadOrRetry() {
         guard let rootVC = findViewController() else {
             log("rootVC = nil → 1프레임 뒤 재시도")
@@ -115,8 +117,9 @@ final class AdFitVerboseHostView: UIView, AdFitBannerAdViewDelegate {
         }
 
         attempt += 1
+        // 🔸 요청할 실제 사이즈를 미리 파싱
         let parts = adUnitSize.split(separator: "x").compactMap { Double($0) }
-        let width = CGFloat(parts.count == 2 ? parts[0] : 320)
+        let width  = CGFloat(parts.count == 2 ? parts[0] : 320)
         let height = CGFloat(parts.count == 2 ? parts[1] : 50)
 
         // 기존 배너 정리
@@ -130,11 +133,14 @@ final class AdFitVerboseHostView: UIView, AdFitBannerAdViewDelegate {
         ad.translatesAutoresizingMaskIntoConstraints = false
         addSubview(ad)
 
-        // 처음엔 "접힌 상태": 높이 제약은 성공 시점에 켭니다.
+        // 🔸 로드 전에 '배너 자신'의 폭/높이를 **고정**해 둡니다 (중요!)
+        let w = ad.widthAnchor.constraint(equalToConstant: width)
+        let h = ad.heightAnchor.constraint(equalToConstant: height)
         NSLayoutConstraint.activate([
+            w, h,
             ad.centerXAnchor.constraint(equalTo: centerXAnchor),
             ad.topAnchor.constraint(equalTo: topAnchor),
-            bottomAnchor.constraint(equalTo: ad.bottomAnchor)
+            bottomAnchor.constraint(equalTo: ad.bottomAnchor) // 컨테이너 높이 = 배너 높이
         ])
 
         onEvent?(.begin(attempt: attempt))
@@ -151,7 +157,7 @@ final class AdFitVerboseHostView: UIView, AdFitBannerAdViewDelegate {
         watchdog = task
         DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(timeoutSec), execute: task)
 
-        // 로드 호출
+        // 🔸 실제 로드 (이 시점엔 배너 뷰 크기가 > 0)
         loadStartAt = Date()
         adfitLog.info("[AdFit][#\(self.logTag)] loadAd()")
         print("🟢 [AdFit][#\(self.logTag)][BEGIN] loadAd start - attempt=\(attempt) clientId=\(clientId) size=\(adUnitSize)")
@@ -160,10 +166,16 @@ final class AdFitVerboseHostView: UIView, AdFitBannerAdViewDelegate {
         } else {
             print("[AdFit][#\(logTag)] delegate is NIL ❌")
         }
-            ad.loadAd()
+        ad.loadAd()
 
         banner = ad
     }
+
+    
+    
+    
+    
+    
 
     private func maybeRetry() {
         guard attempt <= maxRetries else {
@@ -184,20 +196,15 @@ final class AdFitVerboseHostView: UIView, AdFitBannerAdViewDelegate {
         onEvent?(.willLoad)
     }
 
+    // 🔹 성공 콜백은 제약을 다시 걸 필요가 없습니다 (이미 선반영했기 때문)
+    // 필요하다면 여기서는 UI 이벤트만 전달
     func adViewDidReceiveAd(_ adView: AdFitBannerAdView) {
         watchdog?.cancel()
         let elapsed = Int((Date().timeIntervalSince(loadStartAt ?? Date())) * 1000)
         log("✅ SUCCESS elapsed=\(elapsed)ms")
         onEvent?(.success(elapsedMs: elapsed))
-
-        // 성공 시 높이 확정
-        if let h = Double(adUnitSize.split(separator: "x").last ?? "50") {
-            adView.heightAnchor.constraint(equalToConstant: CGFloat(h)).isActive = true
-        }
-        if let w = Double(adUnitSize.split(separator: "x").first ?? "320") {
-            adView.widthAnchor.constraint(equalToConstant: CGFloat(w)).isActive = true
-        }
     }
+
 
     func adView(_ adView: AdFitBannerAdView, didFailToReceiveAdWithError error: Error) {
         watchdog?.cancel()

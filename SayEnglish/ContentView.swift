@@ -729,6 +729,7 @@ struct ChatView: View {
     @State private var bannerHeight: CGFloat = 0
     @State private var bannerMounted = false
     @State private var debugText: String = ""
+    @State private var showBanner = false     // 노출 여부
 
 
 
@@ -788,38 +789,36 @@ struct ChatView: View {
 //                .frame(height: 50)
 //                .padding(.bottom, 6)
             // ↓ 하단 배너 (320x100)
-            if bannerMounted {
-                AdFitVerboseBannerView(
-                    clientId: "DAN-0pxnvDh8ytVm0EsZ",
-                    adUnitSize: "320x50",
-                    timeoutSec: 8,
-                    maxRetries: 2
-                ) { event in
-                    switch event {
-                    case .begin(let attempt):
-                        debugText = "BEGIN attempt \(attempt)"
-                    case .willLoad:
-                        debugText = "WILL_LOAD"
-                    case .success(let ms):
-                        bannerHeight = 50        // ✅ 성공 시에만 펼치기
-                        debugText = "SUCCESS \(ms)ms"
-                    case .fail(let err, let attempt):
-                        bannerHeight = 0         // 실패 시 접기
-                        debugText = "FAIL(\(attempt)): \(err.localizedDescription)"
-                    case .timeout(let sec, let attempt):
-                        bannerHeight = 0         // 타임아웃 시 접기
-                        debugText = "TIMEOUT \(sec)s (attempt \(attempt))"
-                    case .retryScheduled(let after, let next):
-                        debugText = "RETRY in \(after)s → \(next)"
-                    case .disposed:
-                        debugText = "disposed"
-                    }
-                }
-                .id("AdFitBannerFixedID")        // ✅ 아이디 고정 → 재생성 방지
-                .frame(height: bannerHeight)     // 성공 전 0, 성공 시 50
-                .frame(maxWidth: .infinity)
-                .background(.ultraThinMaterial)
-                .animation(.easeInOut(duration: 0.25), value: bannerHeight)
+            .safeAreaInset(edge: .top)  {
+                            AdFitVerboseBannerView(
+                                clientId: "DAN-0pxnvDh8ytVm0EsZ",
+                                adUnitSize: "320x50",
+                                timeoutSec: 8,
+                                maxRetries: 2
+                            ) { event in
+                                switch event {
+                                case .begin(let n):  debugText = "BEGIN \(n)"
+                                case .willLoad:      debugText = "WILL_LOAD"
+                                case .success(let ms):
+                                    showBanner = true          // ✅ 성공 시 보이기
+                                    debugText = "SUCCESS \(ms)ms"
+                                case .fail(let err, let n):
+                                    showBanner = false         // 실패 시 숨기기
+                                    debugText = "FAIL(\(n)): \(err.localizedDescription)"
+                                case .timeout(let sec, let n):
+                                    showBanner = false
+                                    debugText = "TIMEOUT \(sec)s (attempt \(n))"
+                                case .retryScheduled(let after, let next):
+                                    debugText = "RETRY in \(after)s → \(next)"
+                                case .disposed:
+                                    debugText = "disposed"
+                                }
+                            }
+                            .frame(width: 320, height: 50)     // 뷰 자체는 실제 크기 유지
+                            .opacity(showBanner ? 1 : 0)       // 🔸 화면에서는 숨김/표시만 제어
+                            .allowsHitTesting(showBanner)
+                            .padding(.bottom, 8)
+                            .animation(.easeInOut(duration: 0.2), value: showBanner)
             }
 
                        
@@ -972,6 +971,8 @@ struct DetailedChatView: View {
     @State private var bannerHeight: CGFloat = 0
         @State private var bannerMounted = false
         @State private var debugText: String = ""
+    @State private var showBanner = false     // 노출 여부
+
     // 로컬 TTS 전용 합성기 (ChatViewModel에 의존 X)
     @State private var synthesizer = AVSpeechSynthesizer()
     
@@ -1025,37 +1026,37 @@ struct DetailedChatView: View {
 //                            .padding(.bottom, 6)
             
             
-                            AdFitVerboseBannerView(
-                                clientId: "DAN-0pxnvDh8ytVm0EsZ",
-                                adUnitSize: "320x50",
-                                timeoutSec: 8,
-                                maxRetries: 2
-                            ) { event in
-                                switch event {
-                                case .begin(let attempt):
-                                    debugText = "BEGIN attempt \(attempt)"
-                                case .willLoad:
-                                    debugText = "WILL_LOAD"
-                                case .success(let ms):
-                                    bannerHeight = 50        // ✅ 성공 시에만 펼치기
-                                    debugText = "SUCCESS \(ms)ms"
-                                case .fail(let err, let attempt):
-                                    bannerHeight = 0         // 실패 시 접기
-                                    debugText = "FAIL(\(attempt)): \(err.localizedDescription)"
-                                case .timeout(let sec, let attempt):
-                                    bannerHeight = 0         // 타임아웃 시 접기
-                                    debugText = "TIMEOUT \(sec)s (attempt \(attempt))"
-                                case .retryScheduled(let after, let next):
-                                    debugText = "RETRY in \(after)s → \(next)"
-                                case .disposed:
-                                    debugText = "disposed"
-                                }
-                            }
-                            .id("AdFitBannerFixedID")        // ✅ 아이디 고정 → 재생성 방지
-                            .frame(height: bannerHeight)     // 성공 전 0, 성공 시 50
-                            .frame(maxWidth: .infinity)
-                            .background(.ultraThinMaterial)
-                            .animation(.easeInOut(duration: 0.25), value: bannerHeight)
+            .safeAreaInset(edge: .top)  {
+                    AdFitVerboseBannerView(
+                        clientId: "DAN-0pxnvDh8ytVm0EsZ",
+                        adUnitSize: "320x50",
+                        timeoutSec: 8,
+                        maxRetries: 2
+                    ) { event in
+                        switch event {
+                        case .begin(let n):  debugText = "BEGIN \(n)"
+                        case .willLoad:      debugText = "WILL_LOAD"
+                        case .success(let ms):
+                            showBanner = true          // ✅ 성공 시 보이기
+                            debugText = "SUCCESS \(ms)ms"
+                        case .fail(let err, let n):
+                            showBanner = false         // 실패 시 숨기기
+                            debugText = "FAIL(\(n)): \(err.localizedDescription)"
+                        case .timeout(let sec, let n):
+                            showBanner = false
+                            debugText = "TIMEOUT \(sec)s (attempt \(n))"
+                        case .retryScheduled(let after, let next):
+                            debugText = "RETRY in \(after)s → \(next)"
+                        case .disposed:
+                            debugText = "disposed"
+                        }
+                    }
+                    .frame(width: 320, height: 50)     // 뷰 자체는 실제 크기 유지
+                    .opacity(showBanner ? 1 : 0)       // 🔸 화면에서는 숨김/표시만 제어
+                    .allowsHitTesting(showBanner)
+                    .padding(.bottom, 8)
+                    .animation(.easeInOut(duration: 0.2), value: showBanner)
+                    }
             
             
             
@@ -1100,6 +1101,8 @@ struct MainView: View {
 //        @State private var showLevelSelect = false   // ⬅️ 추가
     var onTapStart: (() -> Void)? = nil        // ⬅️ 추가
     @StateObject private var sentenceVM = DailySentenceViewModel()
+    @State private var showBanner = false     // 노출 여부
+
     @State private var bannerHeight: CGFloat = 0
         @State private var bannerMounted = false
         @State private var debugText: String = ""
@@ -1121,52 +1124,53 @@ struct MainView: View {
 
     var body: some View {
         ZStack {
+            // 배경
             LinearGradient(
                 colors: [Color.purple.opacity(0.25), Color.indigo.opacity(0.25)],
                 startPoint: .topLeading, endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
 
+            // 본문
             NavigationView {
                 ScrollView {
                     VStack(spacing: 18) {
+                        // ⬇️ ⬇️ VStack(spacing: 18) { 바로 아래에 추가
+                        ZStack {
+                            // 공간은 항상 50 확보 → 타이틀/콘텐츠와 겹치지 않음
+                            Color.clear.frame(height: 50)
 
-//                        BannerAdView(controller: bannerCtrl)
-//                                                    .frame(height: 50) // 표준 320x50
-//                                                    .padding(.top, 6)
-                        AdFitVerboseBannerView(
-                            clientId: "DAN-0pxnvDh8ytVm0EsZ",
-                            adUnitSize: "320x50",
-                            timeoutSec: 8,
-                            maxRetries: 2
-                        ) { event in
-                            switch event {
-                            case .begin(let attempt):
-                                debugText = "BEGIN attempt \(attempt)"
-                            case .willLoad:
-                                debugText = "WILL_LOAD"
-                            case .success(let ms):
-                                bannerHeight = 50        // ✅ 성공 시에만 펼치기
-                                debugText = "SUCCESS \(ms)ms"
-                            case .fail(let err, let attempt):
-                                bannerHeight = 0         // 실패 시 접기
-                                debugText = "FAIL(\(attempt)): \(err.localizedDescription)"
-                            case .timeout(let sec, let attempt):
-                                bannerHeight = 0         // 타임아웃 시 접기
-                                debugText = "TIMEOUT \(sec)s (attempt \(attempt))"
-                            case .retryScheduled(let after, let next):
-                                debugText = "RETRY in \(after)s → \(next)"
-                            case .disposed:
-                                debugText = "disposed"
+                            AdFitVerboseBannerView(
+                                clientId: "DAN-0pxnvDh8ytVm0EsZ",
+                                adUnitSize: "320x50",
+                                timeoutSec: 8,
+                                maxRetries: 2
+                            ) { event in
+                                switch event {
+                                case .begin: break
+                                case .willLoad: break
+                                case .success(let ms):
+                                    showBanner = true
+                                    debugText = "SUCCESS \(ms)ms"
+                                case .fail(let err, _):
+                                    showBanner = false
+                                    debugText = "FAIL: \(err.localizedDescription)"
+                                case .timeout(let s, _):
+                                    showBanner = false
+                                    debugText = "TIMEOUT \(s)s"
+                                case .retryScheduled: break
+                                case .disposed: break
+                                }
                             }
+                            .frame(width: 320, height: 50)       // SDK용 실제 사이즈 유지 (중요)
+                            .opacity(showBanner ? 1 : 0)         // 안 보일 때만 투명 처리(레이아웃 충돌 없음)
+                            .allowsHitTesting(showBanner)
+                            .background(.ultraThinMaterial)
                         }
-                        .id("AdFitBannerFixedID")        // ✅ 아이디 고정 → 재생성 방지
-                        .frame(height: bannerHeight)     // 성공 전 0, 성공 시 50
-                        .frame(maxWidth: .infinity)
-                        .background(.ultraThinMaterial)
-                        .animation(.easeInOut(duration: 0.25), value: bannerHeight)
-                        
-                        // 상단 바: 타이틀 + [히스토리] [세션] 아이콘
+                        .padding(.top, 4)
+
+
+                        // 상단 바: 타이틀 + 아이콘
                         HStack(spacing: 10) {
                             Text("English Bell")
                                 .font(.largeTitle.bold())
@@ -1174,24 +1178,22 @@ struct MainView: View {
 
                             Spacer()
 
-
-                            // ✅ 새로: 날짜 목록 페이지로 이동
-                                NavigationLink {
-                                    DatesListView()
-                                } label: {
-                                    Image(systemName: "clock.arrow.circlepath")
-                                        .font(.title3.weight(.semibold))
-                                        .foregroundColor(.purple)
-                                        .padding(8)
-                                        .background(Color.white.opacity(0.55), in: Circle())
-                                }
-                                .accessibilityLabel("날짜별 목록")
-  
+                            NavigationLink {
+                                DatesListView()
+                            } label: {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.title3.weight(.semibold))
+                                    .foregroundColor(.purple)
+                                    .padding(8)
+                                    .background(Color.white.opacity(0.55), in: Circle())
+                            }
+                            .accessibilityLabel("날짜별 목록")
                         }
                         .padding(.horizontal, 16)
                         .padding(.top, 6)
 
-                        // 카드 1: 탭 + 저장
+                        // === 카드/콘텐츠들 (기존 코드 그대로) ===
+
                         SectionCard {
                             HStack(spacing: 12) {
                                 Picker("알람 유형", selection: $selectedTab) {
@@ -1212,7 +1214,7 @@ struct MainView: View {
                                                          time: selectedTime, weekdays: selectedWeekdays,
                                                          interval: nil, isActive: true)
                                     }
-                                    let ok = historyManager.addAlarm(alarm: newAlarm) // Bool 반환 필수
+                                    let ok = historyManager.addAlarm(alarm: newAlarm)
                                     if !ok { showAlarmLimitAlert = true }
                                 } label: {
                                     Text("저장").font(.headline)
@@ -1221,32 +1223,26 @@ struct MainView: View {
                             }
                         }
 
-                        // 카드 2: 상세 설정
                         SectionCard(spacing: 14) {
                             if selectedTab == .daily || selectedTab == .weekly {
                                 VStack(alignment: .leading, spacing: 8) {
-                                    Text("시간 선택")
-                                        .font(.headline)
+                                    Text("시간 선택").font(.headline)
                                     DatePicker("", selection: $selectedTime, displayedComponents: .hourAndMinute)
                                         .labelsHidden()
                                         .datePickerStyle(.wheel)
                                         .frame(height: 100)
                                 }
                             }
-
                             if selectedTab == .weekly {
                                 VStack(alignment: .leading, spacing: 8) {
-                                    Text("요일 선택")
-                                        .font(.headline)
+                                    Text("요일 선택").font(.headline)
                                     FlowWeekdays(labels: weekdays, selected: $selectedWeekdays)
                                 }
                             }
-
                             if selectedTab == .interval {
                                 VStack(alignment: .leading, spacing: 8) {
                                     HStack {
-                                        Text("알람 주기")
-                                            .font(.headline)
+                                        Text("알람 주기").font(.headline)
                                         Spacer()
                                         Text("\(Int(selectedInterval))분")
                                             .font(.headline.monospacedDigit())
@@ -1260,40 +1256,26 @@ struct MainView: View {
 
                         SectionCard {
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("오늘의 문장")
-                                    .font(.headline)
-
+                                Text("오늘의 문장").font(.headline)
                                 if sentenceVM.dailySentence.isEmpty {
-                                    Text("불러오는 중...")
-                                        .foregroundColor(.secondary)
+                                    Text("불러오는 중...").foregroundColor(.secondary)
                                 } else {
                                     Text("“\(sentenceVM.dailySentence)”")
-                                        .font(.title3)
-                                        .fontWeight(.semibold)
-                                        .padding(.top, 4)
+                                        .font(.title3).fontWeight(.semibold).padding(.top, 4)
                                     Text(sentenceVM.translation)
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
+                                        .font(.subheadline).foregroundColor(.secondary)
                                 }
                             }
                         }
-                        .onAppear {
-                            sentenceVM.fetchDailySentence()
-                        }
+                        .onAppear { sentenceVM.fetchDailySentence() }
 
-
-
-
-                        // 대화하기 버튼
-                        // 대화하기 버튼
                         Button {
-                            onTapStart?()                              // ⬅️ 레벨 선택 띄우기 신호만 보냄
+                            onTapStart?()
                         } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: "waveform.circle.fill")
                                     .font(.system(size: 22, weight: .semibold))
-                                Text("대화하기")
-                                    .font(.headline)
+                                Text("대화하기").font(.headline)
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
@@ -1306,48 +1288,33 @@ struct MainView: View {
                             .shadow(color: Color.indigo.opacity(0.25), radius: 12, x: 0, y: 8)
                         }
                         .padding(.horizontal, 16)
-//                        // ⬇️ 레벨 선택 풀스크린
-//                        .fullScreenCover(isPresented: $showLevelSelect) {
-//                            LevelSelectView { level in
-//                                self.selectedLevel = level
-//                                self.showLevelSelect = false
-//                                self.showChatView = true
-//                            }
-//                        }
 
-
-                        // 오늘 진행
                         let todaySeconds = historyManager.seconds(for: now)
                         let progress = min(Double(todaySeconds) / 3600.0, 1.0)
 
                         SectionCard {
                             VStack(spacing: 10) {
                                 HStack {
-                                    Text("오늘 대화")
-                                        .font(.headline)
+                                    Text("오늘 대화").font(.headline)
                                     Spacer()
                                     Text("\(mmss(todaySeconds)) / 60:00")
                                         .font(.subheadline.monospacedDigit())
                                         .foregroundStyle(.secondary)
                                 }
-                                GradientProgressBar(progress: progress)
-                                    .frame(height: 16)
+                                GradientProgressBar(progress: progress).frame(height: 16)
                             }
                         }
-                        // ✅ 알람 저장 목록 카드 (오늘 대화 카드 아래에 추가)
+
                         SectionCard {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text("내 알람 목록 (최대 5개)")
-                                    .font(.headline)
-
+                                Text("내 알람 목록 (최대 5개)").font(.headline)
                                 if historyManager.alarms.isEmpty {
                                     Text("등록된 알람이 없습니다.")
                                         .foregroundStyle(.secondary)
                                 } else {
                                     ForEach(historyManager.alarms) { alarm in
                                         HStack {
-                                            Text(alarm.description)
-                                                .font(.subheadline)
+                                            Text(alarm.description).font(.subheadline)
                                             Spacer()
                                             Toggle("", isOn: Binding(
                                                 get: { alarm.isActive },
@@ -1359,8 +1326,7 @@ struct MainView: View {
                                             Button {
                                                 historyManager.deleteAlarm(id: alarm.id)
                                             } label: {
-                                                Image(systemName: "trash.fill")
-                                                    .foregroundColor(.red)
+                                                Image(systemName: "trash.fill").foregroundColor(.red)
                                             }
                                             .buttonStyle(.plain)
                                         }
@@ -1372,9 +1338,6 @@ struct MainView: View {
                             }
                         }
 
-
-                        // ✅ 하단 “대화 기록” 섹션은 제거됨 (SessionsListView로 이동)
-
                         Spacer(minLength: 10)
                     }
                     .padding(.bottom, 16)
@@ -1384,21 +1347,23 @@ struct MainView: View {
                     historyManager.loadChatSessions()
                     now = Date()
                 }
-                .onReceive(minuteTicker) { _ in
-                    now = Date()
-                }
+                .onReceive(minuteTicker) { _ in now = Date() }
                 .background(Color.clear)
                 .navigationBarHidden(true)
             }
-            .navigationViewStyle(.stack)   // ✅ iPad에서도 단일 화면(스택)로 표시
-
+            .navigationViewStyle(.stack)
         }
+        // ⬇️ 배너: ScrollView “안”에만 적용되도록, ScrollView에 붙이는 두 줄!
+        // 1) 공간 확보(상단바와 겹치지 않음)
+        
         .alert("저장할 수 없어요😂", isPresented: $showAlarmLimitAlert) {
             Button("확인", role: .cancel) { }
         } message: {
             Text("알람은 최대 5개까지 저장할 수 있어요.")
         }
     }
+
+
 }
 
 //
@@ -1792,6 +1757,8 @@ struct DatesListView: View {
     @Environment(\.dismiss) var dismiss
 
     @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
+    @State private var showBanner = false     // 노출 여부
+
     @State private var bannerHeight: CGFloat = 0
         @State private var bannerMounted = false
         @State private var debugText: String = ""
@@ -1831,38 +1798,37 @@ struct DatesListView: View {
 //                                BannerAdView(controller: bannerCtrl)
 //                                    .frame(height: 50)
 //                                    .padding(.bottom, 8)
-                AdFitVerboseBannerView(
-                    clientId: "DAN-0pxnvDh8ytVm0EsZ",
-                    adUnitSize: "320x50",
-                    timeoutSec: 8,
-                    maxRetries: 2
-                ) { event in
-                    switch event {
-                    case .begin(let attempt):
-                        debugText = "BEGIN attempt \(attempt)"
-                    case .willLoad:
-                        debugText = "WILL_LOAD"
-                    case .success(let ms):
-                        bannerHeight = 50        // ✅ 성공 시에만 펼치기
-                        debugText = "SUCCESS \(ms)ms"
-                    case .fail(let err, let attempt):
-                        bannerHeight = 0         // 실패 시 접기
-                        debugText = "FAIL(\(attempt)): \(err.localizedDescription)"
-                    case .timeout(let sec, let attempt):
-                        bannerHeight = 0         // 타임아웃 시 접기
-                        debugText = "TIMEOUT \(sec)s (attempt \(attempt))"
-                    case .retryScheduled(let after, let next):
-                        debugText = "RETRY in \(after)s → \(next)"
-                    case .disposed:
-                        debugText = "disposed"
-                    }
-                }
-                .id("AdFitBannerFixedID")        // ✅ 아이디 고정 → 재생성 방지
-                .frame(height: bannerHeight)     // 성공 전 0, 성공 시 50
-                .frame(maxWidth: .infinity)
-                .background(.ultraThinMaterial)
-                .animation(.easeInOut(duration: 0.25), value: bannerHeight)
-                
+                .safeAreaInset(edge: .top)  {
+                        AdFitVerboseBannerView(
+                            clientId: "DAN-0pxnvDh8ytVm0EsZ",
+                            adUnitSize: "320x50",
+                            timeoutSec: 8,
+                            maxRetries: 2
+                        ) { event in
+                            switch event {
+                            case .begin(let n):  debugText = "BEGIN \(n)"
+                            case .willLoad:      debugText = "WILL_LOAD"
+                            case .success(let ms):
+                                showBanner = true          // ✅ 성공 시 보이기
+                                debugText = "SUCCESS \(ms)ms"
+                            case .fail(let err, let n):
+                                showBanner = false         // 실패 시 숨기기
+                                debugText = "FAIL(\(n)): \(err.localizedDescription)"
+                            case .timeout(let sec, let n):
+                                showBanner = false
+                                debugText = "TIMEOUT \(sec)s (attempt \(n))"
+                            case .retryScheduled(let after, let next):
+                                debugText = "RETRY in \(after)s → \(next)"
+                            case .disposed:
+                                debugText = "disposed"
+                            }
+                        }
+                        .frame(width: 320, height: 50)     // 뷰 자체는 실제 크기 유지
+                        .opacity(showBanner ? 1 : 0)       // 🔸 화면에서는 숨김/표시만 제어
+                        .allowsHitTesting(showBanner)
+                        .padding(.bottom, 8)
+                        .animation(.easeInOut(duration: 0.2), value: showBanner)
+                        }
                 
                 
                 
@@ -1930,6 +1896,8 @@ struct SessionsByDateView: View {
     @EnvironmentObject var historyManager: ChatHistoryManager
     @Environment(\.dismiss) var dismiss
     @StateObject private var bannerCtrl = BannerAdController()   // ⬅️ 추가
+    @State private var showBanner = false     // 노출 여부
+
     @State private var bannerHeight: CGFloat = 0
         @State private var bannerMounted = false
         @State private var debugText: String = ""
@@ -1968,38 +1936,37 @@ struct SessionsByDateView: View {
 //                                BannerAdView(controller: bannerCtrl)
 //                                    .frame(height: 50)
 //                                    .padding(.bottom, 8)
-                AdFitVerboseBannerView(
-                    clientId: "DAN-0pxnvDh8ytVm0EsZ",
-                    adUnitSize: "320x50",
-                    timeoutSec: 8,
-                    maxRetries: 2
-                ) { event in
-                    switch event {
-                    case .begin(let attempt):
-                        debugText = "BEGIN attempt \(attempt)"
-                    case .willLoad:
-                        debugText = "WILL_LOAD"
-                    case .success(let ms):
-                        bannerHeight = 50        // ✅ 성공 시에만 펼치기
-                        debugText = "SUCCESS \(ms)ms"
-                    case .fail(let err, let attempt):
-                        bannerHeight = 0         // 실패 시 접기
-                        debugText = "FAIL(\(attempt)): \(err.localizedDescription)"
-                    case .timeout(let sec, let attempt):
-                        bannerHeight = 0         // 타임아웃 시 접기
-                        debugText = "TIMEOUT \(sec)s (attempt \(attempt))"
-                    case .retryScheduled(let after, let next):
-                        debugText = "RETRY in \(after)s → \(next)"
-                    case .disposed:
-                        debugText = "disposed"
-                    }
-                }
-                .id("AdFitBannerFixedID")        // ✅ 아이디 고정 → 재생성 방지
-                .frame(height: bannerHeight)     // 성공 전 0, 성공 시 50
-                .frame(maxWidth: .infinity)
-                .background(.ultraThinMaterial)
-                .animation(.easeInOut(duration: 0.25), value: bannerHeight)
-                
+                .safeAreaInset(edge: .top)  {
+                        AdFitVerboseBannerView(
+                            clientId: "DAN-0pxnvDh8ytVm0EsZ",
+                            adUnitSize: "320x50",
+                            timeoutSec: 8,
+                            maxRetries: 2
+                        ) { event in
+                            switch event {
+                            case .begin(let n):  debugText = "BEGIN \(n)"
+                            case .willLoad:      debugText = "WILL_LOAD"
+                            case .success(let ms):
+                                showBanner = true          // ✅ 성공 시 보이기
+                                debugText = "SUCCESS \(ms)ms"
+                            case .fail(let err, let n):
+                                showBanner = false         // 실패 시 숨기기
+                                debugText = "FAIL(\(n)): \(err.localizedDescription)"
+                            case .timeout(let sec, let n):
+                                showBanner = false
+                                debugText = "TIMEOUT \(sec)s (attempt \(n))"
+                            case .retryScheduled(let after, let next):
+                                debugText = "RETRY in \(after)s → \(next)"
+                            case .disposed:
+                                debugText = "disposed"
+                            }
+                        }
+                        .frame(width: 320, height: 50)     // 뷰 자체는 실제 크기 유지
+                        .opacity(showBanner ? 1 : 0)       // 🔸 화면에서는 숨김/표시만 제어
+                        .allowsHitTesting(showBanner)
+                        .padding(.bottom, 8)
+                        .animation(.easeInOut(duration: 0.2), value: showBanner)
+                        }
                 
                 
                 // 세션 리스트
